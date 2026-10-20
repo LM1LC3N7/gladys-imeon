@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-20
+
 ### Added
 
 - Local reading of IMEON hybrid inverters through the API of OS One (the "API
@@ -49,4 +51,5 @@ the notes of the version's GitHub Release.
   `THIRD_PARTY_NOTICES.md` (Apache-2.0 notice of imeon_inverter_api), shipped
   in the image.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-imeon/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-imeon/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-imeon/releases/tag/v0.1.1
