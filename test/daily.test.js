@@ -313,6 +313,44 @@ test('N5: the wall clock jumps 3 h forward into the window with a 0: the counter
   // Exactly what the counter of the day says (17.2 since midnight), never a day twice.
   assert.equal(p.counted, 17.2);
 });
+// --- Approval round 3 (R4): a night reboot of the inverter is ONE incident -----------
+
+test('N6: unread 10 min, a 0 at 23:10, unread 45 min, back near the day: counted once', () => {
+  const p = approvalDay(20, '23:00');
+  p.read(0, at(0, '23:10'));
+  p.read(19.6, at(0, '23:55'));
+  for (let m = 56; m <= 59; m += 1) p.read(r3(19.6 + (m - 55) * 0.01), at(0, '23:00') + m * MINUTE);
+  p.read(0, at(1, '00:00'));
+  p.read(0.3, at(1, '00:30'));
+  atMost(p.counted, 19.94);
+});
+
+test('N6b: unread 10 min, a stale 12, unread 15 min, back: counted once', () => {
+  const p = approvalDay(20, '23:00');
+  p.read(12, at(0, '23:10'));
+  p.read(19.4, at(0, '23:25'));
+  p.read(0, at(1, '00:00'));
+  p.read(0.3, at(1, '00:30'));
+  atMost(p.counted, 19.7);
+});
+
+test('N6c: the same across the local midnight, the inverter 1 h behind: counted once', () => {
+  const p = approvalDay(20, '23:00');
+  p.read(0, at(0, '23:50'));
+  p.read(19.9, at(1, '00:40'));
+  p.read(0, at(1, '01:00'));
+  p.read(0.3, at(1, '01:30'));
+  atMost(p.counted, 20.2);
+});
+
+test('a real cut across midnight (local day changed, over 1 h unread) is still a new day', () => {
+  const p = pipeline();
+  p.ramp(0, '18:00', '22:00', 10, 14);
+  p.read(1, at(1, '07:00'));
+  p.read(1.5, at(1, '07:10'));
+  p.read(2, at(1, '07:30'));
+  assert.equal(p.counted, 5, '4 kWh in the evening, 1 kWh after the first value of the day');
+});
 test('the state survives a restart through JSON; a broken one is dropped', () => {
   const daily = fresh();
   daily.read(15, at(0, '23:59'));

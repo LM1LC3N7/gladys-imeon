@@ -87,16 +87,19 @@
   - approval R2: a second drop while the first new day may be undone undoes
     it first (night free again), then is judged alone: one new day, never
     two (a stale low value before the inverter's midnight);
-  - approval R3: a new day taken with no gap before it (≤ 3 polls), then a
-    value read after a gap (> 3 polls) back to at least half the day before:
-    undone (≥ the day before: taken; under: no index). A cut across midnight
-    is not touched;
+  - approval R3 and R4: any new day still undoable, then a value read after a
+    gap (> 3 polls) back to at least half the day before: undone (≥ the day
+    before: taken; under: no index). A night reboot of the inverter (unread,
+    0 or stale, unread, back) is ONE incident. Only exception: a real cut
+    across midnight (the local day changed since the last value taken AND
+    over 1 h without reads before the drop, `undo.cut`);
   - a new day keeps the index exactly where it was: its first value is not
     counted (a stale low value never is; less after a real midnight);
-  - risk left near midnight (documented): a glitch to near 0 right after a
-    gap in the reads, then back after another gap, slowly enough for 36 kW:
-    taken as a new day, at most the value it came back with counted too
-    much. Several faults in a row;
+  - risk left near midnight (documented): after a new day still undoable, a
+    value read after a gap but under half the day before is taken as the new
+    day's consumption (at most that value too much); after a real cut across
+    midnight, a return to the day's level after another gap, slow enough for
+    36 kW, would count the day before again;
   - the first value goes on from the index Gladys already holds (never from
     0); its state is kept in `/data` with the guard, written BEFORE the
     values are published (review 1, M5).

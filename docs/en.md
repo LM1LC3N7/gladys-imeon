@@ -79,18 +79,23 @@ Rule: every doubt counts less, never more.
 - A "new day" taken by mistake (a counter at 0 near midnight) is undone when,
   within 3 h, the counter comes back faster than possible, straight back to
   the exact value of the day before, or, read after a gap of more than 3
-  minutes while the new day was taken without one, back to at least half of
-  the day before. The night is then used: a value under the day before gives
-  no index until the counter passes it or the local day changes.
+  minutes, back to at least half of the day before: a night reboot of the
+  inverter (unread, 0 or a stale value, unread, back) is one incident. The
+  only exception: a real cut across midnight (the local day changed and over
+  1 h without reads before the drop). The night is then used: a value under
+  the day before gives no index until the counter passes it or the local day
+  changes.
 - A wall clock set back gives no index until it has caught up with the last
   read.
 - If the integration is stopped for hours around midnight, the energy of
   those hours is not counted.
-- **Risk left near midnight**: a counter at nearly 0 right after a missed
-  read (already a gap before the new day), then back after another gap,
-  slowly enough to be plausible, would be taken as a new day: at most the
-  value it came back with is counted too much. It needs several faults in a
-  row; the guard below still holds any jump of the index.
+- **Risk left near midnight**: after a new day still undoable, a value read
+  after a gap but under half of the day before is taken as the consumption
+  of the new day (at most that value counted too much); and after a real cut
+  across midnight (over 1 h without reads, the local day changed), a return
+  to the level of the day before after another gap, slow enough to be
+  plausible, would count the day before a second time. The guard below still
+  holds any jump of the index.
 
 Each index then passes the **guard** taken from the P1 Monitor integration:
 never 0; a plausible rise (at most 36 kW on average since the last value,

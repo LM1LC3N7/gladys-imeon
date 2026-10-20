@@ -82,19 +82,24 @@ Règle : chaque doute compte moins, jamais plus.
 - Un « nouveau jour » pris par erreur (compteur à 0 près de minuit) est annulé
   si, dans les 3 h, le compteur revient plus vite que possible, revient
   directement à la valeur exacte de la veille, ou, lu après un trou de plus
-  de 3 minutes alors que le nouveau jour avait été pris sans trou, revient à
-  au moins la moitié de la veille. La nuit est alors consommée : une valeur
-  sous celle de la veille ne donne pas d'index tant que le compteur ne l'a
-  pas dépassée ou que le jour local n'a pas changé.
+  de 3 minutes, revient à au moins la moitié de la veille : un redémarrage
+  nocturne de l'onduleur (non lu, 0 ou valeur obsolète, non lu, retour) est
+  un seul incident. Seule exception : une vraie coupure au-delà de minuit
+  (jour local changé et plus d'1 h sans lecture avant la baisse). La nuit
+  est alors consommée : une valeur sous celle de la veille ne donne pas
+  d'index tant que le compteur ne l'a pas dépassée ou que le jour local n'a
+  pas changé.
 - Une horloge qui recule ne donne pas d'index tant qu'elle n'a pas rattrapé la
   dernière lecture.
 - Si l'intégration est arrêtée plusieurs heures autour de minuit, l'énergie
   de ces heures n'est pas comptée.
-- **Risque restant près de minuit** : un compteur à presque 0 juste après une
-  lecture manquée (déjà un trou avant le nouveau jour), puis de retour après
-  un nouveau trou, assez lentement pour être plausible, serait pris pour un
-  nouveau jour : au plus la valeur de retour comptée en trop. Il faut plusieurs pannes à la suite ; la garde
-  ci-dessous retient encore tout saut de l'index.
+- **Risque restant près de minuit** : après un nouveau jour encore
+  annulable, une valeur relue après un trou mais inférieure à la moitié de la
+  veille est prise comme la consommation du nouveau jour (au plus cette
+  valeur comptée en trop) ; et après une vraie coupure au-delà de minuit (plus
+  d'1 h sans lecture, jour local changé), un retour au niveau de la veille
+  après un nouveau trou, assez lent pour être plausible, compterait la veille
+  une seconde fois. La garde ci-dessous retient encore tout saut de l'index.
 
 Chaque index passe ensuite la **garde** reprise de l'intégration P1 Monitor :
 jamais 0 ; une hausse plausible (au plus 36 kW en moyenne depuis la dernière

@@ -32,10 +32,13 @@
 // - a new day taken by mistake (a glitch to 0 near midnight) is undone when,
 //   within `undoWithinMs`, the counter comes back faster than `maxKw` allows,
 //   comes back straight to exactly the value of the day before (a frozen
-//   counter), or, the new day taken with no gap in the reads before it, is
-//   read after a gap (`gapMs`) back to at least half the day before. The
-//   night is then used: a value under the day before gives no index until
-//   the counter passes it or the local day changes (approval R1, R3);
+//   counter), or is read after a gap (`gapMs`) back to at least half the day
+//   before: a night reboot of the inverter (unread, 0 or stale, unread, back)
+//   is ONE incident. Only exception: a real cut across midnight (the local
+//   day changed since the last value taken AND over an hour without reads
+//   before the drop). The night is then used: a value under the day before
+//   gives no index until the counter passes it or the local day changes
+//   (approval R1, R3, R4);
 // - a second drop while the first new day may still be undone (a stale low
 //   value before the inverter's midnight, then its real 0) undoes the first
 //   one, the night free again, and is judged alone (approval R2);
@@ -43,10 +46,11 @@
 //   index and moves nothing; a `readAt` read back from /data in the future is
 //   brought back to the time of loading.
 //
-// Risk left near midnight: a glitch to near 0 right after a gap in the reads,
-// then back after another gap, slowly enough for `maxKw`, is taken as a new
-// day: at most the value it came back with is counted too much. It needs
-// several faults in a row.
+// Risk left near midnight: after a new day still undoable, a value read after
+// a gap but under half the day before is taken as the new day's consumption
+// (at most that value too much); after a real cut across midnight, a return
+// to the day's level after another gap, slow enough for `maxKw`, would count
+// the day before again.
 //
 // Whatever comes out still passes the IndexGuard, which holds any jump or
 // drop of the built index.
@@ -129,6 +133,7 @@ function validState(saved, loadedAt) {
             prevResetWindow: day(undo.prevResetWindow),
             at: clamp(undo.at),
             resetValue: undo.resetValue,
+            cut: undo.cut === true,
           }
         : null,
   };
@@ -215,16 +220,12 @@ export class DailyIndex {
     if (s.undo && (at - s.undo.at > undoWithinMs || at < s.undo.at)) {
       s.undo = null;
     }
-    if (
-      s.undo &&
-      s.undo.at - s.undo.prevReadAt <= gapMs &&
-      at - s.readAt > gapMs &&
-      today >= s.undo.prevToday / 2
-    ) {
-      // A new day taken with no gap in the reads before it, then a value read
-      // after a gap that is back to at least half the day before: the new day
-      // is a doubt, undone (back above the day before: taken; under it: no
-      // index until it passes it or the local day changes).
+    if (s.undo && !s.undo.cut && at - s.readAt > gapMs && today >= s.undo.prevToday / 2) {
+      // Any new day still undoable (but a real cut across midnight), then a
+      // value read after a gap that is back to at least half the day before:
+      // a night reboot of the inverter (unread, 0 or stale, unread, back) is
+      // ONE incident, the new day a doubt, undone (back above the day before:
+      // taken; under it: no index until it passes it or the local day changes).
       this.undo({ consume: true });
       return this.read(today, at);
     }
@@ -276,6 +277,9 @@ export class DailyIndex {
       prevResetWindow: s.resetWindow,
       at,
       resetValue: today,
+      // A real cut across midnight: the local day changed since the last value
+      // taken AND more than an hour without reads before the drop.
+      cut: laterDay && at - s.readAt > HOUR,
     };
     // The index stays exactly where it was: the first value of the new day is
     // not counted (a stale low value before the inverter's midnight would be).
