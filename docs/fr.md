@@ -1,67 +1,116 @@
-# Template de démonstration
+# IMEON pour Gladys Assistant
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+Intégration **non officielle**, sans lien avec Imeon Energy. Elle lit votre
+onduleur hybride IMEON (IMEON 3.6, 9.12, 3-25…) sur votre réseau local, par
+l'API locale d'OS One, sans cloud, une fois par minute. **Lecture seule** :
+elle ne change jamais un réglage de l'onduleur (mode, charge de la batterie,
+injection, relais).
 
-## Ce que vous obtenez
+**Jamais testé avec un vrai onduleur IMEON** : l'intégration a été écrite à
+partir de la bibliothèque officielle d'Imeon Energy (imeon_inverter_api) et
+de l'intégration Home Assistant qui l'utilise. Vos retours sont les bienvenus.
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+## Prérequis
+
+- Un onduleur IMEON avec OS One, joignable sur votre réseau local (adresse
+  IP fixe conseillée dans votre box).
+- Le **module API** activé sur l'onduleur (sans lui, l'intégration indique
+  « réponse qui n'est pas celle d'un IMEON »).
+- L'identifiant et le mot de passe de l'interface locale de l'onduleur (souvent
+  `user@local`). Un compte utilisateur suffit : l'intégration ne fait que lire.
 
 ## Configuration
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+1. Dans Gladys, installez l'intégration IMEON depuis le catalogue.
+2. Saisissez l'**adresse** de l'onduleur (ex. `192.168.1.50`), l'**identifiant**
+   et le **mot de passe**. Le mot de passe est gardé par Gladys dans sa base,
+   jamais réaffiché, envoyé seulement à l'onduleur sur votre réseau.
+3. Cliquez sur **Tester la connexion** : le modèle et le numéro de série de
+   l'onduleur s'affichent.
+4. Dans l'onglet **Découverte**, créez l'appareil « IMEON … ». Ses valeurs
+   arrivent aussitôt, puis chaque minute.
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+## Ce que vous obtenez
 
-## Actions
+- **Solaire** : production totale (`energy-production-sensor`, W), par
+  chaîne, part consommée dans la maison, part injectée.
+- **Batterie** : charge (%), puissance, état (1 = en charge, 2 = en décharge,
+  3 = chargée), puissances stockée et consommée.
+- **Réseau** : puissance prélevée (`energy-sensor`, W, lue par les contrats
+  d'énergie), puissance injectée, flux, tension et courant par phase,
+  fréquence.
+- **Maison** : consommation (W), entrée et sortie AC, compteur d'énergie,
+  températures de l'onduleur, autoconsommation et autosuffisance sur 24 h,
+  état et mode de l'onduleur (en lecture seule), limites de courant de
+  charge et de puissance d'injection.
+- **Compteurs du jour** (kWh) : production solaire, prélevé et injecté sur le
+  réseau, consommation de la maison, stocké dans et pris à la batterie,
+  prévisions restantes. Ce sont de simples capteurs : ils repartent de 0
+  chaque nuit et ne sont jamais comptés par le suivi énergétique.
+- **Deux index d'énergie** pour le suivi énergétique de Gladys : l'index de
+  **consommation réseau** (le cœur en tire la consommation et son coût) et
+  l'index de **production solaire** (le cœur en tire la production par
+  demi-heure).
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+Les phases L2 et L3 n'apparaissent qu'une fois que l'onduleur les montre
+(onduleur triphasé).
 
-## Scènes
+## Les index d'énergie
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+L'API locale de l'onduleur ne donne que des **compteurs du jour**, qui
+repartent de 0 à minuit, et aucun compteur cumulé. Le suivi énergétique de
+Gladys a besoin d'un index cumulé. L'intégration le construit donc :
+index = somme des journées terminées + compteur du jour.
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+- Quand le compteur du jour repart de presque 0 (au plus 36 kWh), au moins
+  12 h après le précédent, c'est un nouveau jour : l'index continue sans
+  baisser. Ce que l'onduleur a compté entre la dernière lecture et son minuit
+  (une minute au plus) est perdu : un peu moins est compté, jamais plus.
+- Une autre baisse du compteur est un incident : pas d'index tant que le
+  compteur n'est pas revenu au-dessus de sa dernière valeur (l'état le dit).
+- Si le compteur retombe à 0 puis revient aussitôt à son niveau (plus vite
+  que possible), le « nouveau jour » est annulé.
+- Si l'intégration est arrêtée plusieurs heures autour de minuit, l'énergie
+  de ces heures n'est pas comptée.
 
-## Tableau de bord
+Chaque index passe ensuite la **garde** reprise de l'intégration P1 Monitor :
+jamais 0 ; une hausse plausible (au plus 36 kW en moyenne depuis la dernière
+valeur, plus 0,5 kWh) passe ; une baisse ou un saut est **retenu** (la
+dernière valeur acceptée est renvoyée), affiché dans l'état de l'intégration
+et gardé après un redémarrage. Seul le bouton **Accepter l'index retenu** le
+prend, et seulement pour la valeur affichée (plus ce qui a pu venir depuis) :
+un saut est alors compté d'un coup, une baisse ne compte rien. Enregistrer la
+configuration n'accepte jamais rien.
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+Si vous supprimez puis recréez l'appareil, ses index repartent de zéro.
 
-## Dépannage
+## Erreurs et pauses
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+- **Identifiant ou mot de passe refusé** : les lectures s'arrêtent (gardé
+  après un redémarrage), un seul nouvel essai après 1 h, puis 2 h… jusqu'à
+  24 h. Corrigez-les et enregistrez la configuration pour repartir aussitôt.
+  Le bouton de test ne force jamais d'essai pendant cet arrêt.
+- **HTTP 429 ou 5xx** : pause de 1 minute à 6 heures (gardée après un
+  redémarrage), jamais de lecture avant la fin.
+- **Onduleur injoignable** : nouvel essai après 1 minute, puis doublé jusqu'à
+  15 minutes.
+- **Session terminée** : l'intégration se reconnecte une seule fois par
+  lecture, jamais en boucle.
+- Une page secondaire (températures, prévisions, état…) qui ne répond pas ne
+  bloque jamais les autres valeurs.
+
+## Limites connues
+
+- Jamais testé avec un vrai onduleur IMEON : les noms des champs et leurs
+  unités viennent de la bibliothèque et de l'intégration Home Assistant.
+- Lecture seule en v0.1 : pas de changement de mode, de charge réseau, de
+  décharge nocturne, d'injection ni de relais.
+- Les messages de la chronologie de l'onduleur ne sont pas lus en v0.1.
+- Un seul onduleur par intégration.
+
+## Données et vie privée
+
+Tout reste sur votre réseau local : l'intégration ne parle qu'à l'onduleur.
+Le dossier `/data` de l'intégration ne garde que le numéro de série, l'état
+des index et des gardes, et les pauses en cours : jamais le mot de passe ni le
+cookie de session.
