@@ -60,6 +60,7 @@ const DAILY_LIMITS = {
   slackKwh: INDEX_SLACK_KWH,
   windowBefore: DAY_WINDOW_BEFORE,
   windowAfter: DAY_WINDOW_AFTER,
+  gapMs: 3 * POLL_INTERVAL,
   timeZone: TIME_ZONE,
 };
 

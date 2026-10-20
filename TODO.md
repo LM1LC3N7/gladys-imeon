@@ -81,10 +81,22 @@
   - always on the side of counting less: the time between the last read and
     the inverter's midnight, hours without reads around midnight, a glitch, a
     real mid-day reset of the counter are lost;
-  - risk left near midnight (documented): a counter at nearly 0 in the
-    window, the inverter unreachable long enough for 36 kW to cover the
-    return, then back at a value near but not equal to the day before: taken
-    as a new day, the day before counted again. Three faults in a row;
+  - approval R1: an undo for a too-fast return (or an exact return) uses the
+    night: a value under the day before gives no index until the counter
+    passes it or the local day changes (the real midnight stays open);
+  - approval R2: a second drop while the first new day may be undone undoes
+    it first (night free again), then is judged alone: one new day, never
+    two (a stale low value before the inverter's midnight);
+  - approval R3: a new day taken with no gap before it (≤ 3 polls), then a
+    value read after a gap (> 3 polls) back to at least half the day before:
+    undone (≥ the day before: taken; under: no index). A cut across midnight
+    is not touched;
+  - a new day keeps the index exactly where it was: its first value is not
+    counted (a stale low value never is; less after a real midnight);
+  - risk left near midnight (documented): a glitch to near 0 right after a
+    gap in the reads, then back after another gap, slowly enough for 36 kW:
+    taken as a new day, at most the value it came back with counted too
+    much. Several faults in a row;
   - the first value goes on from the index Gladys already holds (never from
     0); its state is kept in `/data` with the guard, written BEFORE the
     values are published (review 1, M5).

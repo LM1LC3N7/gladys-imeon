@@ -103,16 +103,16 @@ test('daily index: an index already in Gladys goes on from its value, never from
 test('daily index: a new day around midnight goes on from the index, never drops', () => {
   const daily = fresh();
   assert.equal(daily.read(15, at(0, '23:58')), 15);
-  assert.equal(r3(daily.read(0.02, at(1, '00:01'))), 15.02);
-  assert.equal(r3(daily.read(3, at(1, '02:00'))), 18);
-  assert.equal(r3(daily.read(20, at(1, '23:59'))), 35);
+  assert.equal(r3(daily.read(0.02, at(1, '00:01'))), 15, 'the first value of a day is not counted');
+  assert.equal(r3(daily.read(3, at(1, '02:00'))), 17.98);
+  assert.equal(r3(daily.read(20, at(1, '23:59'))), 34.98);
   // The next midnight, read at 00:00.
-  assert.equal(r3(daily.read(0.1, at(2, '00:00'))), 35.1);
-  assert.equal(r3(daily.read(1, at(2, '01:00'))), 36);
+  assert.equal(r3(daily.read(0.1, at(2, '00:00'))), 34.98);
+  assert.equal(r3(daily.read(1, at(2, '01:00'))), 35.88);
   // Behind: its midnight at 02:30 ours.
   daily.read(10, at(2, '23:00'));
-  assert.equal(r3(daily.read(11, at(3, '02:00'))), 46, 'not yet its midnight');
-  assert.equal(r3(daily.read(0.2, at(3, '02:30'))), 46.2);
+  assert.equal(r3(daily.read(11, at(3, '02:00'))), 45.88, 'not yet its midnight');
+  assert.equal(r3(daily.read(0.2, at(3, '02:30'))), 45.88);
 });
 
 test('S1: a reboot at 14:01, 0 for 61 min, then the day back: counted once', () => {
@@ -213,7 +213,7 @@ test('a cut across midnight: the first drop after it is a new day', () => {
   const p = pipeline();
   p.ramp(0, '18:00', '20:00', 10, 12);
   p.read(3, at(1, '09:00'));
-  assert.equal(p.counted, 5, '2 kWh in the evening, 3 of the new day; the night lost');
+  assert.equal(p.counted, 2, '2 kWh in the evening; the night and the first value of the day lost');
 });
 
 test('production in the evening: flat after sunset, glitches, the real night', () => {
@@ -242,15 +242,83 @@ test('a real reset in the day counts less, and the next midnight still works', (
   // Nothing of it counted (it never goes back above 20), but the night works.
   p.read(0.1, at(1, '00:05'));
   p.ramp(1, '00:06', '02:00', 0.1, 2);
-  assert.equal(p.counted, 22);
+  assert.equal(p.counted, 21.9, 'the first value of the new day (0.1) not counted');
 });
 
+// --- Approval of review 1 (scenarios2.mjs): N1, N2, N2b, N4, N4b, N5 ---------------
+
+/** Yesterday 5 kWh, a new day at 00:00, then `total` kWh a day read every minute up to `until`. */
+function approvalDay(total, until) {
+  const p = pipeline();
+  p.read(5, at(-1, '21:00'));
+  p.read(0, at(0, '00:00'));
+  const [h, m] = until.split(':').map(Number);
+  for (let i = 1; i <= h * 60 + m; i += 1)
+    p.read(r3((total * i) / 1440), at(0, '00:00') + i * MINUTE);
+  return p;
+}
+const atMost = (counted, real) => assert.ok(counted <= real + 1e-9, `${counted} > ${real}`);
+
+test('N1: a 0 at 23:05, the counter unread 45 min, back near the day: counted once', () => {
+  const p = approvalDay(20, '23:04');
+  p.read(0, at(0, '23:05'));
+  p.read(19.6, at(0, '23:50'));
+  for (let m = 51; m <= 59; m += 1) p.read(r3(19.6 + (m - 50) * 0.01), at(0, '23:00') + m * MINUTE);
+  p.read(0, at(1, '00:00'));
+  p.read(0.3, at(1, '00:30'));
+  atMost(p.counted, 20.29);
+  assert.equal(p.counted, 19.99);
+});
+
+test('N2: a stale low value (8) at 23:59 then the real midnight: no fictive kWh, nothing held', () => {
+  const p = approvalDay(20, '23:58');
+  p.read(8, at(0, '23:59'));
+  p.read(0, at(1, '00:00'));
+  for (let m = 1; m <= 60; m += 1) p.read(r3(m * 0.01), at(1, '00:00') + m * MINUTE);
+  atMost(p.counted, 20.6);
+  assert.equal(p.counted, 20.572);
+});
+
+test('N2b: a stale low value (0.9) at 23:59 then the real midnight: counted once', () => {
+  const p = approvalDay(20, '23:58');
+  p.read(0.9, at(0, '23:59'));
+  p.read(0, at(1, '00:00'));
+  p.read(0.3, at(1, '00:30'));
+  assert.equal(p.counted, 20.272);
+});
+
+test('N4: a 0 at 23:11, back 30 min later just under the day: no new day taken again', () => {
+  const p = approvalDay(20, '23:10');
+  p.read(0, at(0, '23:11'));
+  assert.equal(p.read(19.25, at(0, '23:41')), undefined, 'under the day before: no index');
+  p.read(0, at(1, '00:00'));
+  p.read(0.5, at(1, '00:30'));
+  atMost(p.counted, 20.5);
+  assert.equal(p.counted, 19.806);
+});
+
+test('N4b: a 0 at 23:11, back 30 min later just above the day: counted once', () => {
+  const p = approvalDay(20, '23:10');
+  p.read(0, at(0, '23:11'));
+  p.read(19.4, at(0, '23:41'));
+  p.read(0, at(1, '00:00'));
+  p.read(0.5, at(1, '00:30'));
+  assert.equal(p.counted, 19.9);
+});
+
+test('N5: the wall clock jumps 3 h forward into the window with a 0: the counter followed', () => {
+  const p = approvalDay(20, '20:30');
+  p.read(0, at(0, '23:31'));
+  p.read(17.2, at(0, '23:32'));
+  // Exactly what the counter of the day says (17.2 since midnight), never a day twice.
+  assert.equal(p.counted, 17.2);
+});
 test('the state survives a restart through JSON; a broken one is dropped', () => {
   const daily = fresh();
   daily.read(15, at(0, '23:59'));
   daily.read(0.1, at(1, '00:01'));
   const again = fresh(JSON.parse(JSON.stringify(daily.state())), at(1, '00:02'));
-  assert.equal(r3(again.read(0.2, at(1, '00:03'))), 15.2);
+  assert.equal(r3(again.read(0.2, at(1, '00:03'))), 15.1);
   assert.equal(fresh({ offset: 'x' }).state(), null);
   assert.equal(fresh().state(), null);
 });

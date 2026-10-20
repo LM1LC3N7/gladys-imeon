@@ -67,26 +67,34 @@ Règle : chaque doute compte moins, jamais plus.
 - Une baisse du compteur n'est un nouveau jour qu'autour du minuit local (de
   23 h à 3 h, fuseau `TZ` du conteneur, Europe/Paris par défaut), une fois par
   nuit, ou si la dernière valeur prise date d'un jour précédent (coupure
-  au-delà de minuit), et seulement jusqu'à 36 kWh au plus. L'index continue
-  alors sans baisser. Ce que l'onduleur a compté entre la dernière lecture et
-  son minuit est perdu : un peu moins est compté.
+  au-delà de minuit), et seulement jusqu'à 36 kWh au plus. L'index reste
+  alors exactement où il était : ni la première valeur du nouveau jour, ni ce
+  que l'onduleur a compté entre la dernière lecture et son minuit ne sont
+  comptés (un peu moins).
+- Une deuxième baisse pendant que le premier nouveau jour peut être annulé
+  (une valeur basse obsolète juste avant minuit, puis le vrai 0) annule le
+  premier : un seul nouveau jour compte.
 - Une autre baisse (redémarrage, horloge perdue, incident en journée) ne donne
   pas d'index tant que le compteur n'est pas revenu au-dessus de sa dernière
   valeur (l'état le dit). Ce qui ne revient pas n'est pas compté.
 - Une hausse plus rapide que 36 kW depuis la dernière valeur prise est un
   saut : jamais prise, jamais confirmée par le temps.
 - Un « nouveau jour » pris par erreur (compteur à 0 près de minuit) est annulé
-  si, dans les 3 h, le compteur revient plus vite que possible, ou revient
-  directement à la valeur exacte de la veille.
+  si, dans les 3 h, le compteur revient plus vite que possible, revient
+  directement à la valeur exacte de la veille, ou, lu après un trou de plus
+  de 3 minutes alors que le nouveau jour avait été pris sans trou, revient à
+  au moins la moitié de la veille. La nuit est alors consommée : une valeur
+  sous celle de la veille ne donne pas d'index tant que le compteur ne l'a
+  pas dépassée ou que le jour local n'a pas changé.
 - Une horloge qui recule ne donne pas d'index tant qu'elle n'a pas rattrapé la
   dernière lecture.
 - Si l'intégration est arrêtée plusieurs heures autour de minuit, l'énergie
   de ces heures n'est pas comptée.
-- **Risque restant près de minuit** : un compteur à presque 0 entre 23 h et
-  3 h, puis l'onduleur injoignable assez longtemps, puis de retour à une
-  valeur proche mais pas égale à celle de la veille, serait pris pour un
-  nouveau jour et la veille comptée une seconde fois. Il faut trois pannes à
-  la suite ; la garde ci-dessous retient encore tout saut de l'index.
+- **Risque restant près de minuit** : un compteur à presque 0 juste après une
+  lecture manquée (déjà un trou avant le nouveau jour), puis de retour après
+  un nouveau trou, assez lentement pour être plausible, serait pris pour un
+  nouveau jour : au plus la valeur de retour comptée en trop. Il faut plusieurs pannes à la suite ; la garde
+  ci-dessous retient encore tout saut de l'index.
 
 Chaque index passe ensuite la **garde** reprise de l'intégration P1 Monitor :
 jamais 0 ; une hausse plausible (au plus 36 kW en moyenne depuis la dernière

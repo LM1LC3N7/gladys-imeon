@@ -65,26 +65,32 @@ Rule: every doubt counts less, never more.
 - A drop of the counter is a new day only around the local midnight (11 pm
   to 3 am, time zone `TZ` of the container, Europe/Paris by default), once a
   night, or when the last value taken is from an earlier day (a cut across
-  midnight), and only down to 36 kWh at most. The index then goes on without
-  dropping. What the inverter counted between the last read and its midnight
-  is lost: a little less is counted.
+  midnight), and only down to 36 kWh at most. The index then stays exactly
+  where it was: neither the first value of the new day nor what the inverter
+  counted between the last read and its midnight is counted (a little less).
+- A second drop while the first new day may still be undone (a stale low
+  value just before midnight, then the real 0) undoes the first one: only one
+  new day counts.
 - Any other drop (a reboot, a lost clock, a glitch in the day) gives no index
   until the counter is back above its last value (the status says so). What
   is not back is not counted.
 - A rise faster than 36 kW since the last value taken is a jump: never
   taken, never confirmed by time.
 - A "new day" taken by mistake (a counter at 0 near midnight) is undone when,
-  within 3 h, the counter comes back faster than possible, or straight back
-  to the exact value of the day before.
+  within 3 h, the counter comes back faster than possible, straight back to
+  the exact value of the day before, or, read after a gap of more than 3
+  minutes while the new day was taken without one, back to at least half of
+  the day before. The night is then used: a value under the day before gives
+  no index until the counter passes it or the local day changes.
 - A wall clock set back gives no index until it has caught up with the last
   read.
 - If the integration is stopped for hours around midnight, the energy of
   those hours is not counted.
-- **Risk left near midnight**: a counter at nearly 0 between 11 pm and 3 am,
-  then the inverter unreachable long enough, then back at a value close to
-  but not equal to the one of the day before, would be taken as a new day and
-  the day before counted a second time. It needs three faults in a row; the
-  guard below still holds any jump of the index.
+- **Risk left near midnight**: a counter at nearly 0 right after a missed
+  read (already a gap before the new day), then back after another gap,
+  slowly enough to be plausible, would be taken as a new day: at most the
+  value it came back with is counted too much. It needs several faults in a
+  row; the guard below still holds any jump of the index.
 
 Each index then passes the **guard** taken from the P1 Monitor integration:
 never 0; a plausible rise (at most 36 kW on average since the last value,

@@ -22,23 +22,31 @@
 //   before to `windowAfter` after it, in `timeZone`: the inverter's clock may
 //   be a little off), once per night, or when the last value taken is from an
 //   earlier local day (a cut across midnight), and only down to at most
-//   `resetMaxKwh`. The last value of the day ended goes into `offset`: the
-//   index goes on without dropping. What the inverter counted between our
-//   last read and its midnight is lost (less);
+//   `resetMaxKwh`. The index stays exactly where it was (`offset` takes the
+//   difference): neither the first value of the new day nor what the
+//   inverter counted between our last read and its midnight is counted (less;
+//   a stale low value just before its midnight is never counted);
 // - any other drop (a reboot, a clock lost, a glitch in the day) gives no
 //   index, and nothing moves: the counter must come back above the last value
 //   taken. What was counted meanwhile and is not back is lost (less);
 // - a new day taken by mistake (a glitch to 0 near midnight) is undone when,
 //   within `undoWithinMs`, the counter comes back faster than `maxKw` allows,
-//   or comes back to exactly the value of the day before (a frozen counter);
+//   comes back straight to exactly the value of the day before (a frozen
+//   counter), or, the new day taken with no gap in the reads before it, is
+//   read after a gap (`gapMs`) back to at least half the day before. The
+//   night is then used: a value under the day before gives no index until
+//   the counter passes it or the local day changes (approval R1, R3);
+// - a second drop while the first new day may still be undone (a stale low
+//   value before the inverter's midnight, then its real 0) undoes the first
+//   one, the night free again, and is judged alone (approval R2);
 // - a wall clock set back (a value read before the last one taken) gives no
 //   index and moves nothing; a `readAt` read back from /data in the future is
 //   brought back to the time of loading.
 //
-// Risk left near midnight: a glitch to near 0 in the midnight window, then
-// the inverter unreachable long enough for `maxKw` to cover the return, then
-// back at a value other than the one of the day before, is taken as a new day
-// and the day before is counted again. It needs three faults in a row.
+// Risk left near midnight: a glitch to near 0 right after a gap in the reads,
+// then back after another gap, slowly enough for `maxKw`, is taken as a new
+// day: at most the value it came back with is counted too much. It needs
+// several faults in a row.
 //
 // Whatever comes out still passes the IndexGuard, which holds any jump or
 // drop of the built index.
@@ -53,6 +61,8 @@ export const DAILY_DEFAULTS = {
   slackKwh: 0.5,
   windowBefore: HOUR,
   windowAfter: 3 * HOUR,
+  /** More than this between two reads is a gap (3 polls). */
+  gapMs: 3 * 60_000,
   timeZone: 'Europe/Paris',
 };
 
@@ -164,13 +174,20 @@ export class DailyIndex {
     return this.s.offset + today;
   }
 
-  undo() {
+  /**
+   * Undo the pending new day. `consume`: the night stays used (a glitch was
+   * seen in it, a value under the day before gives no index until the
+   * counter passes it or the local day changes); otherwise the night is free
+   * again (a second drop: the real new day may still come).
+   */
+  undo({ consume }) {
     const { undo } = this.s;
-    this.s.offset -= undo.prevToday;
+    const night = this.s.resetWindow;
+    this.s.offset -= undo.prevToday - undo.resetValue;
     this.s.today = undo.prevToday;
     this.s.readAt = undo.prevReadAt;
     this.s.readDay = undo.prevReadDay;
-    this.s.resetWindow = undo.prevResetWindow;
+    this.s.resetWindow = consume ? night : undo.prevResetWindow;
     this.s.undo = null;
   }
 
@@ -194,9 +211,22 @@ export class DailyIndex {
       // The wall clock went back: nothing taken, nothing moved.
       return undefined;
     }
-    const { resetMaxKwh, undoWithinMs, maxKw, slackKwh } = this.limits;
+    const { resetMaxKwh, undoWithinMs, maxKw, slackKwh, gapMs } = this.limits;
     if (s.undo && (at - s.undo.at > undoWithinMs || at < s.undo.at)) {
       s.undo = null;
+    }
+    if (
+      s.undo &&
+      s.undo.at - s.undo.prevReadAt <= gapMs &&
+      at - s.readAt > gapMs &&
+      today >= s.undo.prevToday / 2
+    ) {
+      // A new day taken with no gap in the reads before it, then a value read
+      // after a gap that is back to at least half the day before: the new day
+      // is a doubt, undone (back above the day before: taken; under it: no
+      // index until it passes it or the local day changes).
+      this.undo({ consume: true });
+      return this.read(today, at);
     }
     if (
       s.undo &&
@@ -206,7 +236,7 @@ export class DailyIndex {
     ) {
       // Straight from the new day's value back to exactly the value of the day
       // before (a real new day climbs on its way): a frozen counter, undone.
-      this.undo();
+      this.undo({ consume: true });
       return this.read(today, at);
     }
     if (today >= s.today) {
@@ -215,8 +245,8 @@ export class DailyIndex {
         return this.take(today, at);
       }
       if (s.undo) {
-        // Too fast for a new day: the new day was a glitch, undone.
-        this.undo();
+        // Too fast for a new day: the new day was a glitch, undone; the night is used.
+        this.undo({ consume: true });
         return this.read(today, at);
       }
       // A jump: never taken, never confirmed by time.
@@ -225,6 +255,13 @@ export class DailyIndex {
       return undefined;
     }
     // A drop: a new day, or a glitch.
+    if (s.undo) {
+      // A second drop while the first new day may still be undone (a stale
+      // low value before the inverter's midnight, then its real 0): the first
+      // one is undone, the night free again, and this drop judged alone.
+      this.undo({ consume: false });
+      return this.read(today, at);
+    }
     const night = this.window(at);
     const laterDay = s.readDay !== null && this.local(at).date > s.readDay;
     const newDay =
@@ -240,7 +277,9 @@ export class DailyIndex {
       at,
       resetValue: today,
     };
-    s.offset += s.today;
+    // The index stays exactly where it was: the first value of the new day is
+    // not counted (a stale low value before the inverter's midnight would be).
+    s.offset += s.today - today;
     s.resetWindow = night.key;
     return this.take(today, at);
   }

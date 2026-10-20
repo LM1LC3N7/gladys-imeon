@@ -150,7 +150,7 @@ test('a created device gets its values and its two indexes, never through the co
   assert.equal(last(gladys, 'consumption_index'), 6.5);
   energy(r, { grid_consumed: 20, pv: 0 });
   await tick(12 * HOUR);
-  assert.equal(last(gladys, 'consumption_index'), 6.52);
+  assert.equal(last(gladys, 'consumption_index'), 6.5, 'the first value of a day not counted');
   assert.equal(last(gladys, 'production_index'), 12.5);
   assert.equal(last(gladys, 'energy_grid_consumed_today'), 0.02);
   assert.equal(gladys.fake.publishedEnergyConsumption.length, 0);
