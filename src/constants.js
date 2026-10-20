@@ -86,10 +86,17 @@ export const INDEX_SLACK_KWH = 0.5;
  * started counting again at its midnight.
  */
 export const DAY_RESET_MAX_KWH = INDEX_MAX_KW;
-/** Two new days are at least this far apart: a drop sooner is a glitch. */
-export const DAY_RESET_MIN_GAP = 12 * HOUR;
-/** A new day contradicted within this delay (the old level back too fast) is undone. */
-export const DAY_RESET_UNDO_WITHIN = HOUR;
+/**
+ * A drop is a new day only from 1 h before to 3 h after the local midnight
+ * (the inverter's clock may be a little off), once a night, or after a cut
+ * across midnight.
+ */
+export const DAY_WINDOW_BEFORE = HOUR;
+export const DAY_WINDOW_AFTER = 3 * HOUR;
+/** A new day contradicted within this delay (too fast, or the old value back) is undone. */
+export const DAY_RESET_UNDO_WITHIN = 3 * HOUR;
+/** The local midnight: the TZ of the container, else the inverters' home market. */
+export const TIME_ZONE = process.env.TZ || 'Europe/Paris';
 
 /** A power above this (W) is a glitch. */
 export const POWER_MAX = 100_000;

@@ -26,10 +26,15 @@ the notes of the version's GitHub Release.
 - Two energy indexes for the Gladys energy monitoring, built from the counters
   of the day of the inverter (it gives no lifetime counter): the grid
   consumption index (`energy-sensor` / `index`) and the solar production index
-  (`energy-production-sensor` / `index`, with its 30-minute production). A new
-  day of the inverter never drops them; a drop that is no new day gives no
-  index; both pass the guard of gladys-p1-monitor (never 0, jumps and drops
-  held until the "Accept the held index" button, bounded to the value shown).
+  (`energy-production-sensor` / `index`, with its 30-minute production). A
+  drop is a new day only around the local midnight (or after a cut across
+  it); any other drop, and any rise faster than 36 kW, gives no index; every
+  doubt counts less, never more. Both pass the guard of gladys-p1-monitor
+  (never 0, jumps and drops held until the "Accept the held index" button,
+  bounded to the value shown).
+- Nothing is published before the `/data` page of the current session gave
+  the serial: another address or another inverter never writes into the
+  device of the previous one.
 - Refused credentials stop the reads (kept in `/data`), one new try after 1 h,
   then 2 h, up to 24 h; a save of the configuration starts again. HTTP 429 and
   5xx pause the reads from 1 minute to 6 hours (kept in `/data`). An

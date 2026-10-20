@@ -111,8 +111,8 @@ export const T = {
       fr: `Certaines pages ne répondent pas (${pages.map((p) => PAGE[p].fr).join(', ')}) : les autres valeurs continuent.`,
     }),
     noIndex: (names) => ({
-      en: `The counter of the day dropped without a new day (${names.map((n) => INDEX[n].en).join(', ')}): no index until it is back above its last value.`,
-      fr: `Le compteur du jour a baissé sans nouveau jour (${names.map((n) => INDEX[n].fr).join(', ')}) : pas d’index tant qu’il n’est pas revenu au-dessus de sa dernière valeur.`,
+      en: `The counter of the day made a jump or a drop that is not a new day (${names.map((n) => INDEX[n].en).join(', ')}): no index until it is back to a plausible value; what is not back is not counted.`,
+      fr: `Le compteur du jour a fait un saut ou une baisse qui n’est pas un nouveau jour (${names.map((n) => INDEX[n].fr).join(', ')}) : pas d’index tant qu’il n’est pas revenu à une valeur plausible ; ce qui ne revient pas n’est pas compté.`,
     }),
     held: (name, { direction, from, to }) => {
       const index = INDEX[name];

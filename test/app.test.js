@@ -291,33 +291,117 @@ test('a secondary page failing never holds back the main values', async () => {
   assert.equal(last(gladys, 'consumption_index'), 6);
 });
 
-test('an index jump is held, shown, and taken only by the accept button', async () => {
+test('a jump of the counter of the day is never taken; the status says so', async () => {
   const r = imeonRoutes();
-  const store = createMemoryStore();
   const device = created({ index: { value: 1000, at: NOW - MINUTE } });
-  const { app, gladys, tick } = await setup({ routes: r, devices: [device], store });
+  const { app, gladys, tick } = await setup({ routes: r, devices: [device] });
   await app.start(CONFIG);
   await app.idle();
   // Gladys held 1000: the index goes on from there.
   assert.equal(last(gladys, 'consumption_index'), 1000);
-  // The counter of the day jumps by 500 kWh in a minute: held.
+  // The counter of the day jumps by 500 kWh in a minute: no index, ever.
   energy(r, { grid_consumed: 506_000 });
-  await tick();
+  for (let i = 0; i < 10; i += 1) await tick();
   assert.equal(last(gladys, 'consumption_index'), 1000);
+  assert.match(status(gladys).message.fr, /saut ou une baisse/);
+  // Back to the real level: it goes on.
+  energy(r, { grid_consumed: 6100 });
+  await tick();
+  assert.equal(last(gladys, 'consumption_index'), 1000.1);
+});
+
+test('an index jump is held by the guard, shown, and taken only by the accept button', async () => {
+  const r = imeonRoutes();
+  // /data from an old backup: its built index (1500) is ahead of Gladys (1000).
+  const store = createMemoryStore({
+    serial: SERIAL,
+    indexes: {
+      [F('consumption_index')]: {
+        guard: null,
+        daily: { offset: 1494, today: 6, readAt: NOW - MINUTE, readDay: '2026-10-20' },
+      },
+    },
+  });
+  const device = created({ index: { value: 1000, at: NOW - MINUTE } });
+  const { app, gladys, tick } = await setup({ routes: r, devices: [device], store });
+  await app.start(CONFIG);
+  await app.idle();
+  assert.equal(last(gladys, 'consumption_index'), 1000, 'the last accepted value, never the jump');
   assert.match(status(gladys).message.fr, /a sauté de 1000 à 1500 kWh/);
   assert.equal(store.data.indexes[F('consumption_index')].guard.held.to, 1500);
   // A save of the form accepts nothing.
   await app.start(CONFIG, { fresh: true });
   await app.idle();
-  assert.equal(last(gladys, 'consumption_index'), 1000);
-  // The button: exactly what was shown.
+  assert.match(status(gladys).message.fr, /a sauté/);
+  // The button: exactly what was shown, published at the next poll.
   const answer = await gladys.fake.action(ACTIONS.ACCEPT_HELD);
   assert.match(answer.data.message.en, /500 kWh/);
   await app.idle();
+  await tick();
   assert.equal(last(gladys, 'consumption_index'), 1500);
   assert.doesNotMatch(status(gladys).message.fr, /retenu/);
   const nothing = await gladys.fake.action(ACTIONS.ACCEPT_HELD);
   assert.match(nothing.data.message.en, /nothing to accept/);
+});
+
+test('another address: nothing published before its serial is read (I1)', async () => {
+  const A = imeonRoutes();
+  const B = imeonRoutes({
+    results: { energy: { ...RESULTS.energy, grid_consumed: 4000, pv: 9000 } },
+  });
+  B['/data'] = () => json({ serial: '??', type: 'x' });
+  const byHost = { [ADDRESS]: createFetch(A), '192.168.1.77': createFetch(B) };
+  const gladys = createFakeGladys({ selector: SELECTOR, config: CONFIG, devices: [created()] });
+  await gladys.connect();
+  const clock = { now: NOW };
+  const app = new ImeonApp({
+    gladys,
+    logger: createLogger(),
+    now: () => clock.now,
+    monotonic: () => clock.now,
+    timers: createFakeTimers(),
+    store: createMemoryStore(),
+    clientFactory: ({ address }) =>
+      new ImeonClient({ address, fetchImpl: byHost[address].fetch, spacing: 0 }),
+  });
+  await app.start(CONFIG);
+  await app.idle();
+  assert.equal(last(gladys, 'consumption_index'), 6);
+  const states = gladys.fake.states.length;
+  clock.now += 13 * HOUR;
+  await app.start({ ...CONFIG, address: '192.168.1.77' }, { fresh: true });
+  await app.idle();
+  assert.equal(gladys.fake.states.length, states, 'not one value of B in the device of A');
+  assert.equal(last(gladys, 'energy_grid_consumed_today'), 6);
+  assert.equal(status(gladys).connected, false);
+  // The same inverter after a new login (a DHCP swap, a reboot): /data read again.
+  const before = byHost[ADDRESS].calls.filter((c) => c.path === '/data').length;
+  await app.start(CONFIG, { fresh: true });
+  await app.idle();
+  assert.equal(byHost[ADDRESS].calls.filter((c) => c.path === '/data').length, before + 1);
+  assert.equal(status(gladys).connected, true);
+});
+
+test('no read less than a poll apart, unless the timer, a save or a creation asks (M3)', async () => {
+  const { app, fake, gladys, tick } = await setup({ devices: [created()] });
+  await app.start(CONFIG);
+  await app.idle();
+  const reads = () => calls(fake, '/api/battery');
+  assert.equal(reads(), 1);
+  // A reconnection, an update, a scan, an acceptance 10 s later: no new read.
+  await app.start(CONFIG);
+  await app.idle();
+  await app.onDeviceUpdated({ external_id: DEVICE });
+  await app.scan();
+  await gladys.fake.action(ACTIONS.ACCEPT_HELD);
+  await app.idle();
+  assert.equal(reads(), 1);
+  assert.equal(status(gladys).connected, true);
+  await tick();
+  assert.equal(reads(), 2);
+  await app.start(CONFIG, { fresh: true });
+  await app.idle();
+  assert.equal(reads(), 3, 'a save of the form reads at once');
 });
 
 test('the test button: the model and serial; the unreachable case in our words', async () => {

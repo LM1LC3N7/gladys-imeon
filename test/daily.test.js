@@ -1,135 +1,268 @@
 // -----------------------------------------------------------------------------
 // The cumulative index built from a counter of the day (src/daily.js), alone
-// and with the guard behind it.
+// and with the guard behind it, counting what the core would count (every
+// rise of the published index). Rule: every doubt counts less, never more.
+// Times are local (Europe/Paris, CEST in mid-October: UTC+2).
 // -----------------------------------------------------------------------------
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DailyIndex } from '../src/daily.js';
+import { DailyIndex, localParts } from '../src/daily.js';
 import { IndexGuard } from '../src/guard.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const LIMITS = {
   resetMaxKwh: 36,
-  minGapMs: 12 * HOUR,
-  undoWithinMs: HOUR,
+  undoWithinMs: 3 * HOUR,
   maxKw: 36,
   slackKwh: 0.5,
+  windowBefore: HOUR,
+  windowAfter: 3 * HOUR,
+  timeZone: 'Europe/Paris',
 };
-const fresh = (saved) => new DailyIndex(saved, LIMITS);
+const fresh = (saved, loadedAt) => new DailyIndex(saved, LIMITS, loadedAt);
 const r3 = (v) => (v === undefined ? undefined : Math.round(v * 1000) / 1000);
+/** Local time in Paris on 2026-10-(12 + day), "HH:MM" (CEST, UTC+2). */
+const at = (day, hhmm) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  return Date.UTC(2026, 9, 12 + day, h - 2, m);
+};
+
+/** daily.js then guard.js, as src/app.js publish() chains them; `counted` as the core counts. */
+function pipeline() {
+  let daily = fresh();
+  let guard = new IndexGuard(undefined, undefined, 0, { maxKw: 36, slackKwh: 0.5 });
+  let core;
+  let counted = 0;
+  return {
+    read(today, time) {
+      const built = daily.read(today, time, guard.last);
+      const total = r3(built);
+      const ok = total !== undefined && guard.accept(total, time);
+      const sent = ok ? total : guard.held ? guard.last?.value : undefined;
+      if (sent !== undefined) {
+        if (core !== undefined && sent > core) counted += sent - core;
+        core = sent;
+      }
+      return sent;
+    },
+    restart(time) {
+      daily = fresh(JSON.parse(JSON.stringify(daily.state())), time);
+      const g = JSON.parse(JSON.stringify(guard.state()));
+      guard = new IndexGuard(g.last, g, time, { maxKw: 36, slackKwh: 0.5 });
+    },
+    /** One read a minute from `from` to `to` (local, same day), the counter rising linearly. */
+    ramp(day, from, to, kwhFrom, kwhTo) {
+      const a = at(day, from);
+      const b = at(day, to);
+      for (let t = a; t <= b; t += MINUTE) {
+        this.read(r3(kwhFrom + ((kwhTo - kwhFrom) * (t - a)) / (b - a)), t);
+      }
+    },
+    get counted() {
+      return r3(counted);
+    },
+  };
+}
+
+/** A day up to 14:00 with 20 kWh, after a new day at 00:05. */
+function dayUntil2pm(kwh = 20, until = '14:00') {
+  const p = pipeline();
+  p.read(5, at(-1, '23:00'));
+  p.read(0, at(0, '00:05'));
+  p.ramp(0, '00:06', until, 0, kwh);
+  return p;
+}
+
+test('local parts in the time zone; an unknown zone falls back to Paris', () => {
+  assert.deepEqual(localParts(at(0, '00:30'), 'Europe/Paris'), { date: '2026-10-12', hour: 0 });
+  assert.deepEqual(localParts(at(0, '23:30'), 'Europe/Paris'), { date: '2026-10-12', hour: 23 });
+  assert.deepEqual(localParts(at(0, '00:30'), 'Nowhere/Else'), { date: '2026-10-12', hour: 0 });
+});
 
 test('daily index: the same day, it follows the counter; the first read starts from it', () => {
   const daily = fresh();
-  assert.equal(daily.read(2, 0), 2);
-  assert.equal(daily.read(2, MINUTE), 2, 'unchanged');
-  assert.equal(daily.read(3.5, 2 * MINUTE), 3.5);
+  assert.equal(daily.read(2, at(0, '10:00')), 2);
+  assert.equal(daily.read(2, at(0, '10:01')), 2, 'unchanged');
+  assert.equal(daily.read(2.5, at(0, '10:02')), 2.5);
+  assert.equal(daily.read(4, at(0, '10:03')), undefined, '1.5 kWh in a minute: a jump');
   for (const bad of [undefined, null, NaN, -1, '3', Infinity]) {
-    assert.equal(daily.read(bad, 3 * MINUTE), undefined, String(bad));
+    assert.equal(daily.read(bad, at(0, '10:04')), undefined, String(bad));
   }
   assert.equal(daily.read(4, NaN), undefined);
 });
 
 test('daily index: an index already in Gladys goes on from its value, never from 0', () => {
   const daily = fresh();
-  assert.equal(daily.read(5, 0, { value: 1000 }), 1000);
-  assert.equal(daily.read(6, MINUTE), 1001);
-  assert.equal(fresh().read(5, 0, { value: 0 }), 5, 'a value of 0 is no reference');
+  assert.equal(daily.read(5, at(0, '10:00'), { value: 1000 }), 1000);
+  assert.equal(daily.read(6, at(0, '10:30')), 1001);
+  assert.equal(fresh().read(5, at(0, '10:00'), { value: 0 }), 5, 'a value of 0 is no reference');
 });
 
-test('daily index: a new day goes on from the index, never drops', () => {
+test('daily index: a new day around midnight goes on from the index, never drops', () => {
   const daily = fresh();
-  assert.equal(daily.read(15, 0), 15);
-  // Midnight of the inverter: the counter starts again.
-  assert.equal(r3(daily.read(0.02, MINUTE)), 15.02);
-  assert.equal(r3(daily.read(3, 2 * HOUR)), 18);
-  // The next midnight, 24 h later.
-  assert.equal(r3(daily.read(20, 24 * HOUR - MINUTE)), 35);
-  assert.equal(r3(daily.read(0, 24 * HOUR)), 35);
-  assert.equal(r3(daily.read(1, 25 * HOUR)), 36);
+  assert.equal(daily.read(15, at(0, '23:58')), 15);
+  assert.equal(r3(daily.read(0.02, at(1, '00:01'))), 15.02);
+  assert.equal(r3(daily.read(3, at(1, '02:00'))), 18);
+  assert.equal(r3(daily.read(20, at(1, '23:59'))), 35);
+  // The next midnight, read at 00:00.
+  assert.equal(r3(daily.read(0.1, at(2, '00:00'))), 35.1);
+  assert.equal(r3(daily.read(1, at(2, '01:00'))), 36);
+  // Behind: its midnight at 02:30 ours.
+  daily.read(10, at(2, '23:00'));
+  assert.equal(r3(daily.read(11, at(3, '02:00'))), 46, 'not yet its midnight');
+  assert.equal(r3(daily.read(0.2, at(3, '02:30'))), 46.2);
 });
 
-test('daily index: a drop that is no new day gives no index; back above, it goes on', () => {
-  const daily = fresh();
-  daily.read(12, 0);
-  // 11 is not "near 0 of a new day"... but 36 kWh is the bound: a drop to
-  // 11 with no new day yet IS a new day. With one 2 h ago, it is a glitch.
-  daily.read(0.5, 2 * HOUR); // a new day (the first one)
-  daily.read(8, 4 * HOUR);
-  assert.equal(daily.read(7, 5 * HOUR), undefined, 'a drop 3 h after a new day: a glitch');
-  assert.equal(daily.read(7.5, 6 * HOUR), undefined, 'still below the last value taken');
-  assert.equal(r3(daily.read(8.5, 7 * HOUR)), 20.5, 'back above: 12 + 8.5');
-  // A drop above the bound (36 kWh) is never a new day.
-  const big = fresh();
-  big.read(100, 0);
-  assert.equal(big.read(50, 13 * HOUR), undefined);
+test('S1: a reboot at 14:01, 0 for 61 min, then the day back: counted once', () => {
+  const p = dayUntil2pm();
+  for (let m = 1; m <= 61; m += 1) {
+    assert.equal(p.read(0, at(0, '14:00') + m * MINUTE), undefined, 'no index');
+  }
+  p.read(20.05, at(0, '15:03'));
+  assert.equal(p.counted, 20.05);
 });
 
-test('daily index: a glitch to 0 contradicted at once is undone (no fictive rise)', () => {
-  const daily = fresh();
-  daily.read(12, 0);
-  // At 13:00 the counter reads 0 once (no new day before: taken as one)...
-  assert.equal(daily.read(0, 13 * HOUR), 12);
-  // ...and 12.01 a minute later: impossible from 0 in a minute, undone.
-  assert.equal(r3(daily.read(12.01, 13 * HOUR + MINUTE)), 12.01);
-  assert.equal(r3(daily.read(12.5, 14 * HOUR)), 12.5);
-  // The new day after the undo is free again (the reset date was restored).
-  assert.equal(r3(daily.read(0.1, 24 * HOUR)), 12.6);
+test('S1b: one 0, unreachable 70 min, back with 1 kWh more: counted once', () => {
+  const p = dayUntil2pm();
+  p.read(0, at(0, '14:01'));
+  p.read(21, at(0, '15:11'));
+  assert.equal(p.counted, 21);
 });
 
-test('daily index: a real new day is never undone by a fast morning', () => {
-  const daily = fresh();
-  daily.read(15, 0);
-  assert.equal(daily.read(0.1, MINUTE), 15.1);
-  // 3 kWh in an hour: below the old level, a normal rise.
-  assert.equal(r3(daily.read(3, HOUR)), 18);
-  // Even back at the old level, slowly enough (36 kW for an hour + 0.5).
-  const second = fresh();
-  second.read(10, 0);
-  second.read(0.1, MINUTE);
-  assert.equal(r3(second.read(10.2, MINUTE + 59 * MINUTE)), 20.2, 'possible in 59 min at 36 kW');
+test('S1c: the inverter clock lost (2 h of 0), then fixed: counted once', () => {
+  const p = dayUntil2pm(18, '13:00');
+  for (let m = 1; m <= 120; m += 5) p.read(0, at(0, '13:00') + m * MINUTE);
+  p.read(24, at(0, '15:01'));
+  assert.equal(p.counted, 24);
 });
 
-test('daily index: hours without reads across midnight count less, never more', () => {
-  const daily = fresh();
-  daily.read(14, 0); // 23:00
-  // Read again at 01:00: what came between 23:00 and midnight is lost.
-  assert.equal(r3(daily.read(0.5, 2 * HOUR)), 14.5);
+test('S1d: a glitch to 0.01, then a 6 h pause, then back: counted once', () => {
+  const p = dayUntil2pm(30, '13:00');
+  p.read(0.01, at(0, '13:01'));
+  p.read(36, at(0, '19:01'));
+  assert.equal(p.counted, 36);
 });
 
-test('daily index: its state survives a restart through JSON', () => {
+test('S1e: a 20-min freeze at 0 in the day: counted once', () => {
+  const p = dayUntil2pm(10, '13:00');
+  for (let m = 1; m <= 20; m += 1) p.read(0, at(0, '13:00') + m * MINUTE);
+  p.read(10.1, at(0, '13:21'));
+  assert.equal(p.counted, 10.1);
+});
+
+test('S2: a glitch kept in /data, a restart 90 min later, the counter back: counted once', () => {
+  const p = dayUntil2pm();
+  p.read(0, at(0, '14:01'));
+  p.restart(at(0, '15:30'));
+  p.read(21, at(0, '15:31'));
+  assert.equal(p.counted, 21);
+});
+
+test('S4: a wall clock set back gives no index and moves nothing', () => {
   const daily = fresh();
-  daily.read(15, 0);
-  daily.read(0.1, MINUTE);
+  daily.read(15, at(0, '14:00'));
+  assert.equal(daily.read(0, at(0, '12:00')), undefined, 'before the last value taken');
+  assert.equal(daily.read(16, at(0, '13:00')), undefined);
+  assert.equal(r3(daily.read(16, at(0, '14:30'))), 16);
+  // A date of /data in the future is brought back to the time of loading.
   const saved = JSON.parse(JSON.stringify(daily.state()));
-  const again = fresh(saved);
-  assert.equal(r3(again.read(0.2, 2 * MINUTE)), 15.2);
-  assert.equal(fresh({ offset: 'x' }).state(), null, 'a broken state is dropped');
+  saved.readAt = at(5, '00:00');
+  const again = fresh(saved, at(0, '15:00'));
+  assert.equal(again.state().readAt, at(0, '15:00'));
+  assert.equal(r3(again.read(16.5, at(0, '15:30'))), 16.5);
+  // A drop at 00:30 with a reference read "in the future" is no new day.
+  const night = fresh();
+  night.read(10, at(0, '23:30'));
+  assert.equal(night.read(0, at(0, '22:00')), undefined);
+});
+
+test('a jump is never taken, nor confirmed by time', () => {
+  const daily = fresh();
+  daily.read(10, at(0, '12:00'));
+  assert.equal(daily.read(40, at(0, '12:01')), undefined);
+  for (let m = 2; m <= 600; m += 1) {
+    assert.equal(daily.read(40, at(0, '12:00') + m * MINUTE), undefined, `minute ${m}`);
+  }
+  assert.equal(r3(daily.read(10.2, at(0, '22:01'))), 10.2, 'back to the real level');
+});
+
+test('a glitch to 0 at midnight is undone: too fast, or straight back to the same value', () => {
+  // Too fast: 20 kWh back in 20 minutes after a 0.
+  const fast = pipeline();
+  fast.ramp(0, '20:00', '23:10', 17, 20);
+  for (let m = 1; m <= 19; m += 1) fast.read(0, at(0, '23:10') + m * MINUTE);
+  fast.read(20.01, at(0, '23:30'));
+  assert.equal(fast.counted, 3.01);
+  // Straight back to exactly the same value after 2 h unreachable (36 kW would allow it).
+  const frozen = pipeline();
+  frozen.ramp(0, '20:00', '23:10', 17, 20);
+  frozen.read(0, at(0, '23:11'));
+  frozen.read(20, at(1, '01:11'));
+  assert.equal(frozen.counted, 3);
+  // A real new day climbs through the old value: never undone.
+  const real = pipeline();
+  real.read(5, at(0, '23:50'));
+  real.read(0, at(1, '00:01'));
+  real.ramp(1, '00:02', '02:00', 0.1, 8);
+  assert.equal(real.counted, 8);
+});
+
+test('a cut across midnight: the first drop after it is a new day', () => {
+  const p = pipeline();
+  p.ramp(0, '18:00', '20:00', 10, 12);
+  p.read(3, at(1, '09:00'));
+  assert.equal(p.counted, 5, '2 kWh in the evening, 3 of the new day; the night lost');
+});
+
+test('production in the evening: flat after sunset, glitches, the real night', () => {
+  const p = pipeline();
+  p.ramp(0, '08:00', '19:00', 0.01, 12);
+  for (let t = at(0, '19:01'); t < at(0, '21:00'); t += MINUTE) p.read(12, t);
+  // A drop at 21:00, out of the midnight window: no index, back at 21:10.
+  assert.equal(p.read(0, at(0, '21:00')), undefined);
+  p.read(12, at(0, '21:10'));
+  for (let t = at(0, '21:11'); t < at(0, '23:30'); t += MINUTE) p.read(12, t);
+  // A glitch to 0 at 23:30 (in the window, taken as a new day), back at 23:45.
+  p.read(0, at(0, '23:30'));
+  p.read(12, at(0, '23:45'));
+  assert.equal(p.counted, 11.99);
+  // The real midnight: 0 all night, the sun at 08:00.
+  p.read(0, at(1, '00:00'));
+  for (let t = at(1, '00:01'); t < at(1, '08:00'); t += 10 * MINUTE) p.read(0, t);
+  p.ramp(1, '08:00', '12:00', 0.01, 6);
+  assert.equal(p.counted, 17.99);
+});
+
+test('a real reset in the day counts less, and the next midnight still works', () => {
+  const p = dayUntil2pm();
+  // The inverter really starts again from 0 at 14:01 and counts 4 kWh by 18:00.
+  p.ramp(0, '14:01', '18:00', 0, 4);
+  // Nothing of it counted (it never goes back above 20), but the night works.
+  p.read(0.1, at(1, '00:05'));
+  p.ramp(1, '00:06', '02:00', 0.1, 2);
+  assert.equal(p.counted, 22);
+});
+
+test('the state survives a restart through JSON; a broken one is dropped', () => {
+  const daily = fresh();
+  daily.read(15, at(0, '23:59'));
+  daily.read(0.1, at(1, '00:01'));
+  const again = fresh(JSON.parse(JSON.stringify(daily.state())), at(1, '00:02'));
+  assert.equal(r3(again.read(0.2, at(1, '00:03'))), 15.2);
+  assert.equal(fresh({ offset: 'x' }).state(), null);
   assert.equal(fresh().state(), null);
 });
 
-test('daily index and guard: three days of a real inverter, every value taken, no jump', () => {
-  const daily = fresh();
-  const guard = new IndexGuard(undefined, undefined, 0, { maxKw: 36, slackKwh: 0.5 });
-  let at = 0;
-  let total = 0;
+test('daily index and guard: three real days, every value taken, no jump, a minute lost a day', () => {
+  const p = pipeline();
+  let sent;
   for (let day = 0; day < 3; day += 1) {
-    for (let minute = 0; minute < 24 * 60; minute += 1) {
-      const today = minute * 0.01; // 0.6 kWh an hour
-      const index = daily.read(today, at, guard.last);
-      if (index !== undefined && Math.round(index * 1000) / 1000 > 0) {
-        assert.equal(
-          guard.accept(Math.round(index * 1000) / 1000, at),
-          true,
-          `day ${day} ${minute}`,
-        );
-        total = index;
-      }
-      at += MINUTE;
+    for (let m = 0; m < 24 * 60; m += 1) {
+      sent = p.read(r3(m * 0.01), at(day, '00:00') + m * MINUTE);
     }
   }
-  // Every day 14.39 kWh (the last minute before midnight is not counted).
-  assert.equal(Math.round(total * 100) / 100, 43.17);
-  assert.equal(guard.held, undefined);
+  assert.equal(p.counted, 43.16, 'from the first value above 0');
+  assert.equal(sent, 43.17);
 });

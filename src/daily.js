@@ -11,47 +11,114 @@
 //
 //   index = offset + today
 //
-// where `offset` is the sum of the days already ended. The rules, all on the
-// side of counting LESS, never more:
-// - a counter that rises (or stays) is the same day: the index follows it;
-// - a counter that drops to at most `resetMaxKwh`, at least `minGapMs` after
-//   the last new day (or with none yet), is a new day: the last value of the
-//   day ended goes into `offset`, so the index goes on from where it was,
-//   without any drop. What the inverter counted between our last read and
-//   its midnight (up to a minute) is lost: a little less is counted;
-// - any other drop is a glitch: no index for that read (nothing published),
-//   the counter must come back above the last value taken to give one again
-//   (what was counted meanwhile is lost: less, never more);
-// - a new day contradicted at once (within `undoWithinMs`, the counter back
-//   at or above the old level faster than `maxKw` allows from the new day's
-//   value) was a glitch to near 0: undone, the offset as before;
-// - the inverter's midnight is never guessed (its clock, its time zone): only
-//   its counter dropping says a day ended.
+// where `offset` is the sum of the days already ended. Every doubt counts
+// LESS, never more. The rules:
+// - a rise of the counter is taken only when it is plausible since the last
+//   value taken: at most `maxKw` × the time since that read (`readAt`, moved
+//   by every value taken, an equal one included) + `slackKwh`. A larger rise
+//   is a jump: no index, the counter of reference does not move, and
+//   `readAt` moves anyway, so a jump is never confirmed by time;
+// - a drop is a new day only around the local midnight (from `windowBefore`
+//   before to `windowAfter` after it, in `timeZone`: the inverter's clock may
+//   be a little off), once per night, or when the last value taken is from an
+//   earlier local day (a cut across midnight), and only down to at most
+//   `resetMaxKwh`. The last value of the day ended goes into `offset`: the
+//   index goes on without dropping. What the inverter counted between our
+//   last read and its midnight is lost (less);
+// - any other drop (a reboot, a clock lost, a glitch in the day) gives no
+//   index, and nothing moves: the counter must come back above the last value
+//   taken. What was counted meanwhile and is not back is lost (less);
+// - a new day taken by mistake (a glitch to 0 near midnight) is undone when,
+//   within `undoWithinMs`, the counter comes back faster than `maxKw` allows,
+//   or comes back to exactly the value of the day before (a frozen counter);
+// - a wall clock set back (a value read before the last one taken) gives no
+//   index and moves nothing; a `readAt` read back from /data in the future is
+//   brought back to the time of loading.
+//
+// Risk left near midnight: a glitch to near 0 in the midnight window, then
+// the inverter unreachable long enough for `maxKw` to cover the return, then
+// back at a value other than the one of the day before, is taken as a new day
+// and the day before is counted again. It needs three faults in a row.
 //
 // Whatever comes out still passes the IndexGuard, which holds any jump or
-// drop: the two together never let a fictive rise reach the core.
+// drop of the built index.
 // -----------------------------------------------------------------------------
 
 const HOUR = 3_600_000;
 
-const finite = (value) => typeof value === 'number' && Number.isFinite(value);
+export const DAILY_DEFAULTS = {
+  resetMaxKwh: 36,
+  undoWithinMs: 3 * HOUR,
+  maxKw: 36,
+  slackKwh: 0.5,
+  windowBefore: HOUR,
+  windowAfter: 3 * HOUR,
+  timeZone: 'Europe/Paris',
+};
 
-function validState(saved) {
-  if (!saved || !finite(saved.offset) || !finite(saved.today) || saved.today < 0) {
+const finite = (value) => typeof value === 'number' && Number.isFinite(value);
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const day = (value) => (typeof value === 'string' && DAY.test(value) ? value : null);
+
+const formats = new Map();
+const localPartsFormat = (timeZone) =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  });
+
+/** The local date (YYYY-MM-DD) and hour (0-23) of `at` in `timeZone`. */
+export function localParts(at, timeZone) {
+  let format = formats.get(timeZone);
+  if (!format) {
+    try {
+      format = localPartsFormat(timeZone);
+    } catch {
+      // An unknown time zone: the one of the inverters' home market.
+      format = localPartsFormat(DAILY_DEFAULTS.timeZone);
+    }
+    formats.set(timeZone, format);
+  }
+  const parts = Object.fromEntries(format.formatToParts(at).map((p) => [p.type, p.value]));
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) % 24 };
+}
+
+function validState(saved, loadedAt) {
+  if (
+    !saved ||
+    !finite(saved.offset) ||
+    !finite(saved.today) ||
+    saved.today < 0 ||
+    !finite(saved.readAt)
+  ) {
     return undefined;
   }
   const undo = saved.undo;
+  // A date of /data in the future (a clock set back since) is brought back to now.
+  const clamp = (at) => (finite(loadedAt) ? Math.min(at, loadedAt) : at);
   return {
     offset: saved.offset,
     today: saved.today,
-    resetAt: finite(saved.resetAt) ? saved.resetAt : null,
+    readAt: clamp(saved.readAt),
+    readDay: day(saved.readDay),
+    resetWindow: day(saved.resetWindow),
     undo:
-      undo && finite(undo.prevToday) && finite(undo.at) && finite(undo.resetValue)
+      undo &&
+      finite(undo.prevToday) &&
+      finite(undo.prevReadAt) &&
+      finite(undo.at) &&
+      finite(undo.resetValue)
         ? {
             prevToday: undo.prevToday,
-            at: undo.at,
+            prevReadAt: clamp(undo.prevReadAt),
+            prevReadDay: day(undo.prevReadDay),
+            prevResetWindow: day(undo.prevResetWindow),
+            at: clamp(undo.at),
             resetValue: undo.resetValue,
-            prevResetAt: finite(undo.prevResetAt) ? undo.prevResetAt : null,
           }
         : null,
   };
@@ -59,17 +126,52 @@ function validState(saved) {
 
 export class DailyIndex {
   /**
-   * `saved`: the state kept in /data (`state()`). `limits`: `{ resetMaxKwh,
-   * minGapMs, undoWithinMs, maxKw, slackKwh }`.
+   * `saved`: the state kept in /data (`state()`). `limits`: see
+   * DAILY_DEFAULTS (a missing one takes its default). `loadedAt`: the time of
+   * loading (a date of /data after it is brought back to it).
    */
-  constructor(saved, limits) {
-    this.limits = limits;
-    this.s = validState(saved);
+  constructor(saved, limits = {}, loadedAt) {
+    this.limits = { ...DAILY_DEFAULTS };
+    for (const [key, value] of Object.entries(limits ?? {})) {
+      if (value !== undefined && key in DAILY_DEFAULTS) this.limits[key] = value;
+    }
+    this.s = validState(saved, loadedAt);
   }
 
   /** What /data keeps. */
   state() {
     return this.s ? { ...this.s, undo: this.s.undo ? { ...this.s.undo } : null } : null;
+  }
+
+  local(at) {
+    return localParts(at, this.limits.timeZone);
+  }
+
+  /** The night `at` belongs to (the date after its midnight), and whether `at` is in its window. */
+  window(at) {
+    const { windowBefore, windowAfter } = this.limits;
+    const shifted = this.local(at + windowBefore);
+    return {
+      key: shifted.date,
+      inside: shifted.hour * HOUR < windowBefore + windowAfter,
+    };
+  }
+
+  take(today, at) {
+    this.s.today = today;
+    this.s.readAt = at;
+    this.s.readDay = this.local(at).date;
+    return this.s.offset + today;
+  }
+
+  undo() {
+    const { undo } = this.s;
+    this.s.offset -= undo.prevToday;
+    this.s.today = undo.prevToday;
+    this.s.readAt = undo.prevReadAt;
+    this.s.readDay = undo.prevReadDay;
+    this.s.resetWindow = undo.prevResetWindow;
+    this.s.undo = null;
   }
 
   /**
@@ -85,39 +187,61 @@ export class DailyIndex {
     const s = this.s;
     if (!s) {
       const base = known && finite(known.value) && known.value > 0 ? known.value - today : 0;
-      this.s = { offset: base, today, resetAt: null, undo: null };
-      return base + today;
+      this.s = { offset: base, today, readAt: at, readDay: null, resetWindow: null, undo: null };
+      return this.take(today, at);
     }
-    const { resetMaxKwh, minGapMs, undoWithinMs, maxKw, slackKwh } = this.limits;
-    if (s.undo) {
-      const since = at - s.undo.at;
-      if (since < 0 || since > undoWithinMs) {
-        s.undo = null;
-      } else if (
-        today >= s.undo.prevToday &&
-        today - s.undo.resetValue > (maxKw * since) / HOUR + slackKwh
-      ) {
-        // The old level back too fast for a new day: it was a glitch, undone.
-        s.offset -= s.undo.prevToday;
-        s.resetAt = s.undo.prevResetAt;
-        s.undo = null;
-        s.today = today;
-        return s.offset + today;
-      }
+    if (at < s.readAt) {
+      // The wall clock went back: nothing taken, nothing moved.
+      return undefined;
+    }
+    const { resetMaxKwh, undoWithinMs, maxKw, slackKwh } = this.limits;
+    if (s.undo && (at - s.undo.at > undoWithinMs || at < s.undo.at)) {
+      s.undo = null;
+    }
+    if (
+      s.undo &&
+      s.today === s.undo.resetValue &&
+      today > s.today &&
+      Math.abs(today - s.undo.prevToday) < 0.0005
+    ) {
+      // Straight from the new day's value back to exactly the value of the day
+      // before (a real new day climbs on its way): a frozen counter, undone.
+      this.undo();
+      return this.read(today, at);
     }
     if (today >= s.today) {
-      s.today = today;
-      return s.offset + today;
+      const margin = (maxKw * (at - s.readAt)) / HOUR + slackKwh;
+      if (today - s.today <= margin) {
+        return this.take(today, at);
+      }
+      if (s.undo) {
+        // Too fast for a new day: the new day was a glitch, undone.
+        this.undo();
+        return this.read(today, at);
+      }
+      // A jump: never taken, never confirmed by time.
+      s.readAt = at;
+      s.readDay = this.local(at).date;
+      return undefined;
     }
     // A drop: a new day, or a glitch.
-    const gapOk = s.resetAt === null || at < s.resetAt || at - s.resetAt >= minGapMs;
-    if (today <= resetMaxKwh && gapOk) {
-      s.undo = { prevToday: s.today, at, resetValue: today, prevResetAt: s.resetAt };
-      s.offset += s.today;
-      s.today = today;
-      s.resetAt = at;
-      return s.offset + today;
+    const night = this.window(at);
+    const laterDay = s.readDay !== null && this.local(at).date > s.readDay;
+    const newDay =
+      today <= resetMaxKwh && ((night.inside && s.resetWindow !== night.key) || laterDay);
+    if (!newDay) {
+      return undefined;
     }
-    return undefined;
+    s.undo = {
+      prevToday: s.today,
+      prevReadAt: s.readAt,
+      prevReadDay: s.readDay,
+      prevResetWindow: s.resetWindow,
+      at,
+      resetValue: today,
+    };
+    s.offset += s.today;
+    s.resetWindow = night.key;
+    return this.take(today, at);
   }
 }

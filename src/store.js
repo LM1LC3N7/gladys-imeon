@@ -13,6 +13,13 @@ import { rename, writeFile } from 'node:fs/promises';
 export const DEFAULT_STATE_FILE = '/data/imeon-state.json';
 
 export function createFileStore(file = DEFAULT_STATE_FILE) {
+  /** The saves one after the other: two never share the temporary file. */
+  let queue = Promise.resolve();
+  const write = async (data) => {
+    const tmp = `${file}.tmp`;
+    await writeFile(tmp, JSON.stringify(data), 'utf8');
+    await rename(tmp, file);
+  };
   return {
     load() {
       try {
@@ -22,10 +29,13 @@ export function createFileStore(file = DEFAULT_STATE_FILE) {
         return {};
       }
     },
-    async save(data) {
-      const tmp = `${file}.tmp`;
-      await writeFile(tmp, JSON.stringify(data), 'utf8');
-      await rename(tmp, file);
+    save(data) {
+      const job = queue.then(
+        () => write(data),
+        () => write(data),
+      );
+      queue = job.catch(() => {});
+      return job;
     },
   };
 }

@@ -60,16 +60,31 @@ again from 0 at midnight, and no lifetime counter. The Gladys energy
 monitoring needs a cumulative index. So the integration builds it: index =
 sum of the days ended + counter of the day.
 
-- When the counter of the day starts again from nearly 0 (36 kWh at most), at
-  least 12 h after the previous time, it is a new day: the index goes on
-  without dropping. What the inverter counted between the last read and its
-  midnight (a minute at most) is lost: a little less is counted, never more.
-- Any other drop of the counter is a glitch: no index until the counter is
-  back above its last value (the status says so).
-- If the counter falls to 0 and comes back to its level at once (faster than
-  possible), the "new day" is undone.
+Rule: every doubt counts less, never more.
+
+- A drop of the counter is a new day only around the local midnight (11 pm
+  to 3 am, time zone `TZ` of the container, Europe/Paris by default), once a
+  night, or when the last value taken is from an earlier day (a cut across
+  midnight), and only down to 36 kWh at most. The index then goes on without
+  dropping. What the inverter counted between the last read and its midnight
+  is lost: a little less is counted.
+- Any other drop (a reboot, a lost clock, a glitch in the day) gives no index
+  until the counter is back above its last value (the status says so). What
+  is not back is not counted.
+- A rise faster than 36 kW since the last value taken is a jump: never
+  taken, never confirmed by time.
+- A "new day" taken by mistake (a counter at 0 near midnight) is undone when,
+  within 3 h, the counter comes back faster than possible, or straight back
+  to the exact value of the day before.
+- A wall clock set back gives no index until it has caught up with the last
+  read.
 - If the integration is stopped for hours around midnight, the energy of
   those hours is not counted.
+- **Risk left near midnight**: a counter at nearly 0 between 11 pm and 3 am,
+  then the inverter unreachable long enough, then back at a value close to
+  but not equal to the one of the day before, would be taken as a new day and
+  the day before counted a second time. It needs three faults in a row; the
+  guard below still holds any jump of the index.
 
 Each index then passes the **guard** taken from the P1 Monitor integration:
 never 0; a plausible rise (at most 36 kW on average since the last value,

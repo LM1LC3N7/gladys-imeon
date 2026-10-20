@@ -246,6 +246,9 @@ test('the /data store: written through a temporary file, read back, empty when a
     await store.save({ serial: SERIAL });
     assert.deepEqual(store.load(), { serial: SERIAL });
     assert.deepEqual(createFileStore(join(dir, 'missing', 'x.json')).load(), {});
+    // Saves at once never share the temporary file: the last one wins (M4).
+    await Promise.all([1, 2, 3, 4, 5].map((n) => store.save({ n })));
+    assert.deepEqual(store.load(), { n: 5 });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

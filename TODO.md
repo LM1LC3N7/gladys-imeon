@@ -62,16 +62,32 @@
   only counters of the day. Published as an index, a counter of the day would
   drop to 0 each night (held by the guard forever). So `src/daily.js` builds
   a cumulative index: `offset + today`, `offset` the sum of the days ended:
-  - a drop to at most 36 kWh, at least 12 h after the last new day (or with
-    none yet), is a new day (TZ-independent: the inverter's clock is never
-    guessed); any other drop gives no index for that read;
-  - a new day contradicted within 1 h (the old level back faster than 36 kW
-    allows from the new day's value) is undone;
-  - always on the side of counting less: the minute before the inverter's
-    midnight, hours without reads around midnight, a glitch drop, a mid-day
-    reboot resetting the counter are lost, never counted twice;
+  - review 1, B1 (a): a drop (to at most 36 kWh) is a new day only from 1 h
+    before to 3 h after the local midnight (`TZ` of the container, else
+    Europe/Paris), once a night, or when the last value taken is from an
+    earlier local day (a cut across midnight); any other drop gives no index,
+    nothing moves, until the counter is back above the last value taken
+    (scenarios S1b, S1d, S2 of the review: counted once);
+  - review 1, B1 (b): a rise is taken only when plausible since the last
+    value taken (`readAt`, moved by every value taken, an equal one
+    included): at most 36 kW × the time + 0.5 kWh. A larger rise is a jump:
+    no index, the reference does not move, `readAt` moves (never confirmed
+    by time). Within 3 h of a new day, a jump undoes it, and so does a
+    return straight from the new day's value to the exact value of the day
+    before (a frozen counter after an outage); S1, S1c, S1e counted once;
+  - review 1, I2: a read before `readAt` (a wall clock set back) gives no
+    index and moves nothing; a date of /data in the future is brought back
+    to the time of loading (S4);
+  - always on the side of counting less: the time between the last read and
+    the inverter's midnight, hours without reads around midnight, a glitch, a
+    real mid-day reset of the counter are lost;
+  - risk left near midnight (documented): a counter at nearly 0 in the
+    window, the inverter unreachable long enough for 36 kW to cover the
+    return, then back at a value near but not equal to the day before: taken
+    as a new day, the day before counted again. Three faults in a row;
   - the first value goes on from the index Gladys already holds (never from
-    0); its state is kept in `/data` with the guard.
+    0); its state is kept in `/data` with the guard, written BEFORE the
+    values are published (review 1, M5).
     The result goes through the IndexGuard of gladys-p1-monitor, taken as it
     is, with `maxKw` (36 kW, the largest French residential connection) and
     `slackKwh` (0.5) as parameters. `consumption_index` (grid consumed,
@@ -121,6 +137,19 @@
 - **No custom User-Agent**, no imitation: Node's own fetch, the form of the
   library.
 - **Gladys version**: `>=5.2.0`, like the other energy integrations.
+
+- **Serial confirmed per session** (review 1, I1): a session is one
+  inverter. After every login (another address, a DHCP swap, a reboot), the
+  `/data` page is read again and nothing is published until it gave the
+  serial in that session (`confirmed = { client, session }`); a session
+  opened during the pages reads `/data` again before publishing. Another
+  address does not publish the old device at start (only on the very first
+  start, from the serial in `/data`).
+- **Pace of reads** (review 1, M3): no read less than a poll after the last
+  one, except the timer, a save of the form and a device creation; a
+  reconnection, an update, a scan or an acceptance waits for the next poll.
+- **/data writes** (review 1, M4): the saves are queued, never two on the
+  same temporary file.
 
 ## Ideas
 

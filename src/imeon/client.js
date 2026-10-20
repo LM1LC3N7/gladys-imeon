@@ -116,6 +116,8 @@ export class ImeonClient {
     this.sleep = sleep;
     /** The session cookie (`a=b; c=d`), '' without one; undefined when not logged in. */
     this.session = undefined;
+    /** The number of logins granted so far (a new one is a new session). */
+    this.sessionId = 0;
     this.lastRequestAt = undefined;
     /** Requests one after the other, never two at once (the inverter is slow). */
     this.queue = Promise.resolve();
@@ -204,6 +206,8 @@ export class ImeonClient {
       throw new ImeonError('auth_refused');
     }
     this.session = cookiesOf(response).join('; ');
+    // Each session counts: the app confirms the serial again after every login.
+    this.sessionId += 1;
   }
 
   /** GET of a page with the session: its JSON, or `login_required` when the session ended. */

@@ -21,8 +21,9 @@ import {
   AUTH_RETRY_MIN,
   DATA_INTERVAL,
   DAY_RESET_MAX_KWH,
-  DAY_RESET_MIN_GAP,
   DAY_RESET_UNDO_WITHIN,
+  DAY_WINDOW_AFTER,
+  DAY_WINDOW_BEFORE,
   INDEX_MAX_KW,
   INDEX_SLACK_KWH,
   PAGES,
@@ -33,6 +34,7 @@ import {
   RETRY_MIN,
   STATE_HEARTBEAT,
   TEST_ANSWER_WITHIN,
+  TIME_ZONE,
 } from './constants.js';
 import { DailyIndex } from './daily.js';
 import { FEATURE, buildDevice, capabilitiesOfDevice, ids, pollStates, round } from './devices.js';
@@ -53,10 +55,12 @@ const INDEXES = [
 const GUARD_LIMITS = { maxKw: INDEX_MAX_KW, slackKwh: INDEX_SLACK_KWH };
 const DAILY_LIMITS = {
   resetMaxKwh: DAY_RESET_MAX_KWH,
-  minGapMs: DAY_RESET_MIN_GAP,
   undoWithinMs: DAY_RESET_UNDO_WITHIN,
   maxKw: INDEX_MAX_KW,
   slackKwh: INDEX_SLACK_KWH,
+  windowBefore: DAY_WINDOW_BEFORE,
+  windowAfter: DAY_WINDOW_AFTER,
+  timeZone: TIME_ZONE,
 };
 
 /** Errors that stop the whole read (the inverter itself does not answer well). */
@@ -117,6 +121,10 @@ export class ImeonApp {
     /** The `/data` page: `{ serial, model, software, ... }`; the serial alone when read back. */
     this.info = undefined;
     this.dataAt = undefined;
+    /** `{ client, session }` whose /data page gave the serial (src/imeon/client.js sessionId). */
+    this.confirmed = undefined;
+    /** Monotonic time of the last read started (no read less than a poll apart, unless forced). */
+    this.lastReadAt = undefined;
     this.capabilities = undefined;
     /** By index feature external id: IndexGuard and DailyIndex. */
     this.guards = new Map();
@@ -178,12 +186,18 @@ export class ImeonApp {
       config.address !== this.config.address ||
       config.username !== this.config.username ||
       config.password !== this.config.password;
+    /** The first start of the container: the device of the serial kept in /data is offered. */
+    const first = !this.client && !this.config.address;
     this.config = config;
     if (changed || !this.client) {
       this.client = isComplete(config)
         ? this.clientFactory({ address: config.address })
         : undefined;
       this.dataAt = undefined;
+      // Another address (or account): no value is published before the
+      // /data page of this client has confirmed which inverter answers.
+      this.confirmed = undefined;
+      this.lastReadAt = undefined;
       this.failures = 0;
       this.nextTryAt = 0;
       this.lastError = undefined;
@@ -207,15 +221,20 @@ export class ImeonApp {
     }
     this.gladys.forgetPublishedStates();
     this.capabilities = this.knownCapabilities();
-    await this.discover();
+    if (!changed || first) {
+      // Another address may be another inverter: its device is published
+      // once its serial is read, never the old one with the new address.
+      await this.discover();
+    }
     await this.showWaiting();
     // Always armed, whatever the first read gives: never a dead integration.
     this.timer = this.timers.setInterval(
-      () => this.run(generation, () => this.tick()),
+      () => this.run(generation, () => this.tick({ force: true })),
       POLL_INTERVAL,
     );
-    // Not awaited: a start (a save of the form) answers at once.
-    this.firstRun = this.run(generation, () => this.tick());
+    // Not awaited: a start (a save of the form) answers at once. A
+    // reconnection less than a poll after the last read waits for the timer.
+    this.firstRun = this.run(generation, () => this.tick({ force: fresh || changed }));
   }
 
   async doStop() {
@@ -333,9 +352,9 @@ export class ImeonApp {
       .catch((err) => this.logger.warn(`Publishing the IMEON device failed: ${err.message}`));
   }
 
-  /** The Discover tab asks: the known device, or a read now to find it. */
+  /** The Discover tab asks: the known device, or a read (at most one a poll) to find it. */
   async scan() {
-    if (this.info && this.client) {
+    if (this.info && this.client && this.isConfirmed(this.client)) {
       await this.discover();
     } else if (this.client) {
       await this.run(this.generation, () => this.tick());
@@ -360,38 +379,56 @@ export class ImeonApp {
           this.logger.warn(`Clearing the IMEON index state failed (${err?.code ?? 'error'})`),
         );
       this.savedKey = undefined;
-      await this.run(this.generation, () => this.tick());
+      await this.run(this.generation, () => this.tick({ force: true }));
     }
   }
 
   async onDeviceUpdated(device) {
     if (this.client && device?.external_id === this.external()?.device) {
+      // Read now unless a read was made less than a poll ago (the next one comes).
       await this.run(this.generation, () => this.tick());
     }
   }
 
   // --- Reads -------------------------------------------------------------------------
 
-  /** One read; a read still running (a slow inverter) is never doubled. */
-  tick() {
+  /**
+   * One read; a read still running (a slow inverter) is never doubled.
+   * Without `force` (a reconnection, an update, a scan, an acceptance), no
+   * read less than a poll after the last one: 13 requests are not cheap for
+   * the inverter. The timer, a save of the form and a creation force it.
+   */
+  tick({ force = false } = {}) {
     if (this.busy) {
       if (this.busyGeneration === this.generation) {
         return this.busy;
       }
-      return this.busy.then(() => this.tick());
+      return this.busy.then(() => this.tick({ force }));
     }
     this.busyGeneration = this.generation;
-    this.busy = this.doTick().finally(() => {
+    this.busy = this.doTick(force).finally(() => {
       this.busy = undefined;
     });
     return this.busy;
   }
 
-  async doTick() {
+  /** Whether the /data page read by this client, in its current session, gave the serial. */
+  isConfirmed(client) {
+    return (
+      this.confirmed !== undefined &&
+      this.confirmed.client === client &&
+      this.confirmed.session === client.sessionId
+    );
+  }
+
+  async doTick(force = false) {
     const generation = this.generation;
     const client = this.client;
     const mono = this.monotonic();
     if (!client || mono < this.nextTryAt) {
+      return;
+    }
+    if (!force && this.lastReadAt !== undefined && mono - this.lastReadAt < POLL_INTERVAL) {
       return;
     }
     const now = this.now();
@@ -400,6 +437,7 @@ export class ImeonApp {
       await this.showWaiting();
       return;
     }
+    this.lastReadAt = mono;
     /** A start (other settings, a stop) during an await: this read gives up. */
     const gone = () => client !== this.client || generation !== this.generation;
     let read;
@@ -440,9 +478,11 @@ export class ImeonApp {
   }
 
   /**
-   * The reads of one poll: login when needed, `/data` at start and hourly,
-   * then every page, one after the other. A session that ended is opened
-   * again ONCE per poll; a page failing alone is noted, never fatal.
+   * The reads of one poll: login when needed, `/data` hourly AND after every
+   * login (a session is one inverter: another address, a DHCP swap or a
+   * reboot must confirm its serial before any value is published), then
+   * every page, one after the other. A session that ended is opened again
+   * ONCE per poll; a page failing alone is noted, never fatal.
    */
   async readAll(client, mono, gone) {
     let relogged = false;
@@ -464,12 +504,22 @@ export class ImeonApp {
     if (gone()) return undefined;
     const failing = [];
     let info;
-    if (this.dataAt === undefined || mono - this.dataAt >= DATA_INTERVAL) {
+    const confirm = async () => {
+      info = await client.readData();
+      this.dataAt = mono;
+      this.confirmed = { client, session: client.sessionId };
+    };
+    if (
+      !this.isConfirmed(client) ||
+      this.dataAt === undefined ||
+      mono - this.dataAt >= DATA_INTERVAL
+    ) {
       try {
-        info = await withSession(() => client.readData());
-        this.dataAt = mono;
+        await withSession(confirm);
       } catch (err) {
-        if (FATAL.has(err?.code) || err?.code === 'login_required' || !this.info) throw err;
+        // Without the serial of this session, nothing is published: the
+        // values could be another inverter's.
+        if (FATAL.has(err?.code) || !this.isConfirmed(client) || !this.info) throw err;
         failing.push('data');
       }
       if (gone()) return undefined;
@@ -489,6 +539,12 @@ export class ImeonApp {
     if (!PAGES.some((p) => p.main && pages[p.name])) {
       // Not one main page: not an IMEON answer.
       throw firstError;
+    }
+    if (!this.isConfirmed(client)) {
+      // A new session opened during the pages: its serial is read again (no
+      // new login for it), or nothing is published.
+      await confirm();
+      if (gone()) return undefined;
     }
     return { info, pages, failing };
   }
@@ -552,7 +608,7 @@ export class ImeonApp {
         id,
         new IndexGuard(lastValueOf(created, id), saved?.guard, this.now(), GUARD_LIMITS),
       );
-      this.dailies.set(id, new DailyIndex(saved?.daily, DAILY_LIMITS));
+      this.dailies.set(id, new DailyIndex(saved?.daily, DAILY_LIMITS, this.now()));
     }
     return this.guards.get(id);
   }
@@ -590,6 +646,9 @@ export class ImeonApp {
       // While a value is held, the last accepted one is sent again (no delta for the core).
       values[name] = plausible ? total : guard.held ? guard.last?.value : undefined;
     }
+    // The built indexes and their guards are in /data BEFORE Gladys gets the
+    // values: a crash in between never sends an index /data does not know.
+    await this.saveState();
     const states = pollStates(external, pages, this.info, values);
     // Only the features the created device has (they are fixed at its creation).
     const features = created.features ? new Set(created.features.map((f) => f.external_id)) : null;
@@ -628,7 +687,8 @@ export class ImeonApp {
         `IMEON ${name} index ${direction === 'down' ? 'drop' : 'jump'} accepted by the user`,
       );
     }
-    // Published at the next read, which comes now (unless a pause or a stop runs).
+    // Published at the next read: now, unless a read was made less than a
+    // poll ago or a pause or a stop runs (then at the next poll).
     this.firstRun = this.run(this.generation, () => this.tick());
     return T.accept.done(accepted);
   }
