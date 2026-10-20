@@ -85,7 +85,9 @@ Règle : chaque doute compte moins, jamais plus.
   de 3 minutes, revient à au moins la moitié de la veille : un redémarrage
   nocturne de l'onduleur (non lu, 0 ou valeur obsolète, non lu, retour) est
   un seul incident. Seule exception : une vraie coupure au-delà de minuit
-  (jour local changé et plus d'1 h sans lecture avant la baisse). La nuit
+  (baisse lue hors de la fenêtre de minuit, après 3 h, jour local changé et
+  plus d'1 h sans lecture avant la baisse, mesurée sur l'horloge monotone :
+  une horloge murale qui avance n'en fabrique pas). La nuit
   est alors consommée : une valeur sous celle de la veille ne donne pas
   d'index tant que le compteur ne l'a pas dépassée ou que le jour local n'a
   pas changé.
@@ -96,10 +98,11 @@ Règle : chaque doute compte moins, jamais plus.
 - **Risque restant près de minuit** : après un nouveau jour encore
   annulable, une valeur relue après un trou mais inférieure à la moitié de la
   veille est prise comme la consommation du nouveau jour (au plus cette
-  valeur comptée en trop) ; et après une vraie coupure au-delà de minuit (plus
-  d'1 h sans lecture, jour local changé), un retour au niveau de la veille
-  après un nouveau trou, assez lent pour être plausible, compterait la veille
-  une seconde fois. La garde ci-dessous retient encore tout saut de l'index.
+  valeur comptée en trop) ; et après une vraie coupure au-delà de minuit
+  (baisse lue après 3 h du matin, plus d'1 h sans lecture), un retour au
+  niveau de la veille après un nouveau trou, assez lent pour être plausible,
+  compterait la veille une seconde fois : il faut un onduleur dont le minuit
+  a plus de 3 h de retard, une coupure, un compteur à presque 0 et un retour. La garde ci-dessous retient encore tout saut de l'index.
 
 Chaque index passe ensuite la **garde** reprise de l'intégration P1 Monitor :
 jamais 0 ; une hausse plausible (au plus 36 kW en moyenne depuis la dernière

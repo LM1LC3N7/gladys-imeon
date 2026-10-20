@@ -351,6 +351,40 @@ test('a real cut across midnight (local day changed, over 1 h unread) is still a
   p.read(2, at(1, '07:30'));
   assert.equal(p.counted, 5, '4 kWh in the evening, 1 kWh after the first value of the day');
 });
+// --- Before publication: N9b, N11 (a cut only out of the window, monotonic gap) -------
+
+test('N9b: a 105-min cut, a 0 at 00:15 (inverter 1 h behind), unread 43 min, back: counted once', () => {
+  const p = approvalDay(20, '22:30');
+  p.read(0, at(1, '00:15'));
+  p.read(19.4, at(1, '00:58'));
+  p.read(0, at(1, '01:00'));
+  p.read(0.3, at(1, '01:30'));
+  atMost(p.counted, 19.7);
+});
+
+test('N11: the wall clock jumps 3 h forward, a 0, unread 40 min, back: no forged cut', () => {
+  const p = approvalDay(20, '22:00');
+  p.read(0, at(1, '01:00'));
+  p.read(18.6, at(1, '01:40'));
+  atMost(p.counted, 18.6);
+});
+
+test('a cut is measured on the monotonic clock when the app gives it', () => {
+  // Out of the window (05:00), the local day changed, 7 h on the wall clock
+  // but 1 min on the monotonic one: no cut, the gap rule still applies.
+  const daily = fresh();
+  daily.read(18, at(0, '22:00'));
+  assert.equal(r3(daily.read(0, at(1, '05:00'), undefined, { elapsedMs: MINUTE })), 18);
+  assert.equal(daily.state().undo.cut, false);
+  // Back after a gap to 17 (at least half the day before): the new day is undone,
+  // then taken again (the local day changed) with the index unchanged: nothing counted.
+  assert.equal(r3(daily.read(17, at(1, '05:10'), undefined, { elapsedMs: 10 * MINUTE })), 18);
+  // The same with 7 h on the monotonic clock: a real cut.
+  const real = fresh();
+  real.read(18, at(0, '22:00'));
+  real.read(0, at(1, '05:00'), undefined, { elapsedMs: 7 * HOUR });
+  assert.equal(real.state().undo.cut, true);
+});
 test('the state survives a restart through JSON; a broken one is dropped', () => {
   const daily = fresh();
   daily.read(15, at(0, '23:59'));

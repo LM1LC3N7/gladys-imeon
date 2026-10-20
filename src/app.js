@@ -130,6 +130,8 @@ export class ImeonApp {
     /** By index feature external id: IndexGuard and DailyIndex. */
     this.guards = new Map();
     this.dailies = new Map();
+    /** By index feature external id: monotonic time of the last counter read. */
+    this.counterReadAt = new Map();
     /** Index names with no index this read (a drop of the counter that is no new day). */
     this.noIndex = [];
     this.failingPages = [];
@@ -633,7 +635,15 @@ export class ImeonApp {
         values[name] = guard.held ? guard.last?.value : undefined;
         continue;
       }
-      const built = this.dailies.get(id).read(today, now, guard.last ?? lastValueOf(created, id));
+      // The time since the previous counter read of this index, on the
+      // monotonic clock: a wall clock jumping forward never forges a cut
+      // across midnight (src/daily.js). Unknown after a restart.
+      const mono = this.monotonic();
+      const previous = this.counterReadAt.get(id);
+      this.counterReadAt.set(id, mono);
+      const built = this.dailies.get(id).read(today, now, guard.last ?? lastValueOf(created, id), {
+        elapsedMs: previous === undefined ? undefined : mono - previous,
+      });
       const total = built === undefined ? undefined : round(built, 3);
       if (total === undefined) {
         this.noIndex.push(name);

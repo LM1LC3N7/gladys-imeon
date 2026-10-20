@@ -91,15 +91,19 @@
     gap (> 3 polls) back to at least half the day before: undone (≥ the day
     before: taken; under: no index). A night reboot of the inverter (unread,
     0 or stale, unread, back) is ONE incident. Only exception: a real cut
-    across midnight (the local day changed since the last value taken AND
-    over 1 h without reads before the drop, `undo.cut`);
+    across midnight (`undo.cut`): a drop read OUT of the midnight window
+    (after 3 am), the local day changed since the last value taken AND over
+    1 h without reads before it, measured on the monotonic clock (the app
+    passes `elapsedMs` to `daily.read`; the wall clock only after a restart),
+    so a wall clock jumping forward forges none (N9b, N11);
   - a new day keeps the index exactly where it was: its first value is not
     counted (a stale low value never is; less after a real midnight);
   - risk left near midnight (documented): after a new day still undoable, a
     value read after a gap but under half the day before is taken as the new
     day's consumption (at most that value too much); after a real cut across
-    midnight, a return to the day's level after another gap, slow enough for
-    36 kW, would count the day before again;
+    midnight (a drop read after 3 am), a return to the day's level after
+    another gap, slow enough for 36 kW, would count the day before again: an
+    inverter more than 3 h late, a cut, a counter near 0 and a return;
   - the first value goes on from the index Gladys already holds (never from
     0); its state is kept in `/data` with the guard, written BEFORE the
     values are published (review 1, M5).

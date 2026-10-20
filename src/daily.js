@@ -34,9 +34,10 @@
 //   comes back straight to exactly the value of the day before (a frozen
 //   counter), or is read after a gap (`gapMs`) back to at least half the day
 //   before: a night reboot of the inverter (unread, 0 or stale, unread, back)
-//   is ONE incident. Only exception: a real cut across midnight (the local
-//   day changed since the last value taken AND over an hour without reads
-//   before the drop). The night is then used: a value under the day before
+//   is ONE incident. Only exception: a real cut across midnight (a drop read
+//   OUT of the midnight window, the local day changed since the last value
+//   taken AND over an hour without reads before it, on the monotonic clock
+//   when the app gives it). The night is then used: a value under the day before
 //   gives no index until the counter passes it or the local day changes
 //   (approval R1, R3, R4);
 // - a second drop while the first new day may still be undone (a stale low
@@ -48,9 +49,11 @@
 //
 // Risk left near midnight: after a new day still undoable, a value read after
 // a gap but under half the day before is taken as the new day's consumption
-// (at most that value too much); after a real cut across midnight, a return
-// to the day's level after another gap, slow enough for `maxKw`, would count
-// the day before again.
+// (at most that value too much); after a real cut across midnight (a drop
+// read after the window), a return to the day's level after another gap,
+// slow enough for `maxKw`, would count the day before again: it needs an
+// inverter whose midnight is later than the window, a cut, a counter near 0
+// and a return.
 //
 // Whatever comes out still passes the IndexGuard, which holds any jump or
 // drop of the built index.
@@ -200,9 +203,11 @@ export class DailyIndex {
    * The index for a counter of the day `today` (kWh) read at `at` (ms), or
    * undefined (no index for that read). `known`: the index Gladys holds
    * (`{ value }`), used only the very first time, so that an index already
-   * in Gladys goes on from its value (never from 0).
+   * in Gladys goes on from its value (never from 0). `elapsedMs`: the time
+   * since the previous counter read on a monotonic clock (the wall clock
+   * difference when unknown), for the cut across midnight.
    */
-  read(today, at, known) {
+  read(today, at, known, { elapsedMs } = {}) {
     if (!finite(today) || today < 0 || !finite(at)) {
       return undefined;
     }
@@ -227,7 +232,7 @@ export class DailyIndex {
       // ONE incident, the new day a doubt, undone (back above the day before:
       // taken; under it: no index until it passes it or the local day changes).
       this.undo({ consume: true });
-      return this.read(today, at);
+      return this.read(today, at, undefined, { elapsedMs });
     }
     if (
       s.undo &&
@@ -238,7 +243,7 @@ export class DailyIndex {
       // Straight from the new day's value back to exactly the value of the day
       // before (a real new day climbs on its way): a frozen counter, undone.
       this.undo({ consume: true });
-      return this.read(today, at);
+      return this.read(today, at, undefined, { elapsedMs });
     }
     if (today >= s.today) {
       const margin = (maxKw * (at - s.readAt)) / HOUR + slackKwh;
@@ -248,7 +253,7 @@ export class DailyIndex {
       if (s.undo) {
         // Too fast for a new day: the new day was a glitch, undone; the night is used.
         this.undo({ consume: true });
-        return this.read(today, at);
+        return this.read(today, at, undefined, { elapsedMs });
       }
       // A jump: never taken, never confirmed by time.
       s.readAt = at;
@@ -261,7 +266,7 @@ export class DailyIndex {
       // low value before the inverter's midnight, then its real 0): the first
       // one is undone, the night free again, and this drop judged alone.
       this.undo({ consume: false });
-      return this.read(today, at);
+      return this.read(today, at, undefined, { elapsedMs });
     }
     const night = this.window(at);
     const laterDay = s.readDay !== null && this.local(at).date > s.readDay;
@@ -277,9 +282,11 @@ export class DailyIndex {
       prevResetWindow: s.resetWindow,
       at,
       resetValue: today,
-      // A real cut across midnight: the local day changed since the last value
-      // taken AND more than an hour without reads before the drop.
-      cut: laterDay && at - s.readAt > HOUR,
+      // A real cut across midnight: a drop read OUT of the midnight window,
+      // the local day changed since the last value taken AND more than an hour
+      // without reads before it, measured on the monotonic clock when the app
+      // gives it (elapsedMs), so a wall clock jumping forward forges none.
+      cut: laterDay && !night.inside && (finite(elapsedMs) ? elapsedMs : at - s.readAt) > HOUR,
     };
     // The index stays exactly where it was: the first value of the new day is
     // not counted (a stale low value before the inverter's midnight would be).

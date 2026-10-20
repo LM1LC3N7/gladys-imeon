@@ -81,8 +81,10 @@ Rule: every doubt counts less, never more.
   the exact value of the day before, or, read after a gap of more than 3
   minutes, back to at least half of the day before: a night reboot of the
   inverter (unread, 0 or a stale value, unread, back) is one incident. The
-  only exception: a real cut across midnight (the local day changed and over
-  1 h without reads before the drop). The night is then used: a value under
+  only exception: a real cut across midnight (a drop read out of the midnight
+  window, after 3 am, the local day changed and over 1 h without reads before
+  the drop, measured on the monotonic clock: a wall clock jumping forward
+  forges none). The night is then used: a value under
   the day before gives no index until the counter passes it or the local day
   changes.
 - A wall clock set back gives no index until it has caught up with the last
@@ -92,9 +94,10 @@ Rule: every doubt counts less, never more.
 - **Risk left near midnight**: after a new day still undoable, a value read
   after a gap but under half of the day before is taken as the consumption
   of the new day (at most that value counted too much); and after a real cut
-  across midnight (over 1 h without reads, the local day changed), a return
+  across midnight (a drop read after 3 am, over 1 h without reads), a return
   to the level of the day before after another gap, slow enough to be
-  plausible, would count the day before a second time. The guard below still
+  plausible, would count the day before a second time: it needs an inverter
+  whose midnight is more than 3 h late, a cut, a counter near 0 and a return. The guard below still
   holds any jump of the index.
 
 Each index then passes the **guard** taken from the P1 Monitor integration:
