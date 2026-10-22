@@ -109,9 +109,9 @@ Le compteur de la veille réaffiché (un redémarrage de l'onduleur) est gardé
 hors de l'index : après minuit, une valeur à 0,1 kWh près de la dernière lue
 tant que l'onduleur n'a pas commencé son nouveau jour ; plus tard le même
 jour, une valeur à 0,1 kWh près de celle de la veille alors que le compteur
-du jour est encore en dessous. Le compteur du jour n'est pas envoyé non plus
-pour cette lecture, et l'état le signale. Coût : environ 0,1 kWh quand deux jours finissent à moins
-de 0,1 kWh l'un de l'autre. Le repère de la veille est noté pour la nuit du
+du jour est encore à plus de 0,1 kWh en dessous (un saut, jamais une montée
+lente). Le compteur du jour n'est pas envoyé non plus pour cette lecture, et
+l'état le signale. Le repère de la veille est noté pour la nuit du
 nouveau jour, même quand l'onduleur remet à zéro un peu avant notre minuit.
 Après une mise à jour depuis 0.1.1, cette protection commence au premier
 minuit qui suit (ou tout de suite si la mise à jour tombe dans les 3 h après
@@ -147,9 +147,8 @@ peuvent encore faire perdre le reste d'une journée (comme en 0.1.1).
 
 - une veille réaffichée à plus de 0,1 kWh de la dernière valeur lue, au-dessus
   ou au-dessous, est prise comme une hausse du jour, ou réaffichée alors que le
-  compteur du jour en est déjà à moins de 0,1 kWh (petites journées) : au plus
-  0,1 kWh ; pour une maison qui tire très peu du réseau, le coût de la bande
-  (environ 0,1 kWh par jour) pèse lourd en proportion ;
+  compteur du jour en est déjà à moins de 0,1 kWh en dessous : au plus
+  0,1 kWh ;
 - toute lecture fausse qui tient dans la marge passe : pour la consommation,
   36 kW × la durée du silence (une seule valeur fausse après 30 min sans
   lecture : +6,35 kWh mesurés) ; pour la production, 36 kW les 7 premiers

@@ -11,9 +11,10 @@
 //   - on a later local day than the last value taken, near that value (the
 //     inverter has not started its new day yet);
 //   - later the same local day as a new day, near the value of the day before
-//     while today's counter taken is still under it.
-//   Cost: about 0.1 kWh (the band plus one read) at the end of a day that
-//   ends within 0.1 kWh of the day before. The protection starts at the first
+//     while today's counter taken is still more than 0.1 kWh under it (a
+//     jump, never a slow rise: approval R2).
+//   Risk left: the day before shown again less than 0.1 kWh above today's
+//   counter is taken (0.1 kWh at most too much). The protection starts at the first
 //   midnight after an update from 0.1.1 (no mark before), or at once when the
 //   update falls within 3 h of a new day (the mark is drawn from the daily
 //   index's pending undo, markFromUndo).
@@ -173,6 +174,9 @@ export function keptOut(daily, ref, today, now) {
     // comes before ours resets at 23:xx (review 0.1.2, B1).
     (before.day === day || before.day === daily.window(now).key) &&
     s.today < before.value - STALE_BAND_KWH &&
+    // A jump above today's counter only (review 0.1.2, approval R2): a slow
+    // rise that reaches the value of the day before is never kept out.
+    today - s.today > STALE_BAND_KWH &&
     today >= before.value - STALE_BELOW_KWH &&
     today <= before.value + STALE_BAND_KWH
   ) {

@@ -100,8 +100,8 @@ export const TIME_ZONE = process.env.TZ || 'Europe/Paris';
 
 /**
  * The day before shown again (src/dayBefore.js): a value within this band of
- * it (kWh, above and below) is kept out of the index. Cost: about 0.1 kWh at
- * the end of a day that ends within 0.1 kWh of the day before.
+ * it (kWh, above and below) is kept out of the index, but never a slow rise
+ * of today's counter (src/dayBefore.js).
  */
 export const STALE_BAND_KWH = 0.1;
 export const STALE_BELOW_KWH = STALE_BAND_KWH;

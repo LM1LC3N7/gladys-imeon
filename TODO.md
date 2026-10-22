@@ -207,7 +207,9 @@
     no "36 kW" for the production, no drop taken by the button, update
     starts at the first midnight), m1 (mark drawn from the pending undo after
     an update within 3 h of a new day), m2 (status note for a read kept out),
-    m3 ("about 0.1 kWh").
+    m3 ("about 0.1 kWh", then removed by approval R2: the band no longer
+    costs anything, a slow rise is never kept out; risk left: the day before
+    shown again less than 0.1 kWh above today's counter, 0.1 kWh at most).
   - Left (m4): an acceptance waiting is lost when the margin changes (the
     guard is rebuilt): a second click, never a kWh too much. Optional:
     apply it again when `held.to` did not change.

@@ -104,9 +104,9 @@ Rule: every doubt counts less, never more.
 The counter of the day before shown again (a reboot of the inverter) is kept
 out of the index: after midnight, a value within 0.1 kWh of the last one read
 while the inverter has not started its new day; later the same day, a value
-within 0.1 kWh of the day before while the counter of the day is still under
-it. The counter of the day is not sent either for that read, and the status
-says so. Cost: about 0.1 kWh when two days end within 0.1 kWh of each other.
+within 0.1 kWh of the day before while the counter of the day is still more
+than 0.1 kWh under it (a jump, never a slow rise). The counter of the day is
+not sent either for that read, and the status says so.
 The mark of the day before is noted for the night of the new day, even when
 the inverter resets a little before our midnight. After an update from 0.1.1,
 this protection starts at the first midnight after it (or at once when the
@@ -140,9 +140,7 @@ Longer steps, or steps too large for 36 kW, may still lose the rest of a day
 
 - the day before shown again more than 0.1 kWh away from the last value
   read, above or below, is taken as a rise of the day, or shown again while the
-  counter of the day is already within 0.1 kWh of it (small days): 0.1 kWh at
-  most; for a house that draws very little from the grid, the cost of the band
-  (about 0.1 kWh a day) weighs a lot in proportion;
+  counter of the day is already less than 0.1 kWh under it: 0.1 kWh at most;
 - any false read that fits the margin goes through: for the consumption,
   36 kW × the length of the silence (a single false value after 30 min
   without reads: +6.35 kWh measured); for the production, 36 kW for the

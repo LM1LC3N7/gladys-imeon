@@ -25,7 +25,9 @@ the notes of the version's GitHub Release.
   new day, also when the inverter resets a little before our midnight. After
   the update, this protection starts at the first midnight (or at once within
   3 h of a new day). A small grid day (0.1 kWh or less) still sees the reset
-  of the next day.
+  of the next day, and a slow rise of today's counter up to the value of the
+  day before is never kept out (only a jump to it is); left: the day before
+  shown again less than 0.1 kWh above today's counter, 0.1 kWh at most.
 - The margin of the solar production index follows the installation: 1.5 ×
   the highest solar power of the last 30 days once 7 days are known (2 to
   36 kW), instead of 36 kW, so a false counter after a silence is no longer

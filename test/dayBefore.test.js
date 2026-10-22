@@ -198,3 +198,54 @@ test('a new day taken at 23:xx (inverter ahead): its own small counter is not ke
   assert.equal(c.read(0.001, at(1, '00:00')), 0.07, 'our midnight: today counter, taken');
   assert.equal(c.read(0.05, at(1, '12:00')), 0.119);
 });
+
+// --- Approval R2: a slow rise is never kept out ------------------------------------
+
+/** Counts the rises of the built index, as the core does (kept-out reads give nothing). */
+function counting() {
+  const c = chain();
+  let last;
+  let counted = 0;
+  return {
+    c,
+    read(today, time) {
+      const v = c.read(today, time);
+      if (typeof v === 'number') {
+        if (last !== undefined && v > last) counted += v - last;
+        last = v;
+      }
+      return v;
+    },
+    get counted() {
+      return r3(counted);
+    },
+  };
+}
+
+test('two equal days, then the day before shown again on day 2: counted at most the real', () => {
+  const p = counting();
+  for (let day = 0; day < 2; day += 1) {
+    for (let m = 0; m < 1440; m += 1) {
+      const today = r3((Math.min(Math.max(0, m - 480), 720) / 720) * 10);
+      if (day === 1 && m === 720) {
+        // Noon of day 2 (counter at 4): a reboot shows the day before (10) again.
+        assert.equal(p.read(10, at(day, '00:00') + m * MINUTE), 'kept out');
+      }
+      p.read(today, at(day, '00:00') + m * MINUTE);
+    }
+  }
+  assert.ok(p.counted <= 20, `counted ${p.counted}`);
+  assert.ok(p.counted >= 19.98, `counted ${p.counted}`);
+});
+
+test('seven days of 0.15 kWh spread over the day: counted as real within 0.01 kWh', () => {
+  const p = counting();
+  for (let day = 0; day < 7; day += 1) {
+    for (let m = 0; m < 1440; m += 1) {
+      p.read(r3((m / 1439) * 0.15), at(day, '00:00') + m * MINUTE);
+    }
+  }
+  // Real: 7 × 0.15 kWh, minus the first read of each new day (nothing counted for it).
+  assert.ok(Math.abs(p.counted - 1.05) <= 0.01, `counted ${p.counted}`);
+  assert.ok(p.counted <= 1.05 + 1e-9);
+});
