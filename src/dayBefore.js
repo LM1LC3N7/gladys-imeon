@@ -154,7 +154,12 @@ export function keptOut(daily, ref, today, now) {
   if (
     s.readDay &&
     day > s.readDay &&
-    today >= s.today - STALE_BELOW_KWH &&
+    // Not when the new day of this night is already taken (an inverter whose
+    // midnight comes before ours reset at 23:xx): the counter is today's.
+    s.resetWindow !== daily.window(now).key &&
+    // At least half the last value (review 0.1.2, approval R1): a small grid
+    // day (0.1 kWh or less) must still see the reset of the next day.
+    today >= Math.max(s.today - STALE_BELOW_KWH, s.today / 2) &&
     today <= s.today + STALE_BAND_KWH
   ) {
     const seen = ref.staleSeen?.day === day ? ref.staleSeen.value : 0;

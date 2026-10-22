@@ -176,3 +176,25 @@ test('after an update from 0.1.1 within 3 h of a new day, the mark comes from th
   markFromUndo(daily, kept);
   assert.equal(kept.dayBefore.value, 9, 'an existing mark is kept');
 });
+
+test('approval R1: a small grid day (0.06 kWh) still sees the reset of the next day', () => {
+  const c = chain();
+  c.read(0.05, at(0, '22:00'));
+  c.read(0.06, at(0, '23:59'));
+  // The next day starts at 0.001 kWh: far under half the day before, a new day.
+  assert.equal(c.read(0.001, at(1, '00:01')), 0.06);
+  assert.equal(c.ref.dayBefore.value, 0.06);
+  assert.equal(c.read(0.002, at(1, '00:02')), 0.061);
+  // Still near it after midnight (the inverter late): kept out as before.
+  const late = chain();
+  late.read(0.06, at(0, '23:59'));
+  assert.equal(late.read(0.06, at(1, '00:01')), 'kept out');
+});
+
+test('a new day taken at 23:xx (inverter ahead): its own small counter is not kept out after our midnight', () => {
+  const c = chain();
+  c.read(0.07, at(0, '22:59'));
+  assert.equal(c.read(0.001, at(0, '23:00')), 0.07, 'its midnight, an hour before ours');
+  assert.equal(c.read(0.001, at(1, '00:00')), 0.07, 'our midnight: today counter, taken');
+  assert.equal(c.read(0.05, at(1, '12:00')), 0.119);
+});

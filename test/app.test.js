@@ -535,3 +535,44 @@ test('review 0.1.2, I1: a solar counter updated every 8 min at 5 kW loses nothin
   // the documented cost of the band (one step here, 0.2 kWh).
   assert.ok(counted >= 79.75 && counted <= 80.001, `counted ${counted}`);
 });
+
+test('approval R1: a house on battery, a week of small grid days, counted as real', async () => {
+  // The week crosses the end of summer time (2026-10-25): the inverter's
+  // midnight (on the test's UTC+2 clock) then comes at 23:00 ours.
+  const r = imeonRoutes();
+  const start = Date.UTC(2026, 9, 20, 22, 0); // 2026-10-21 00:00 in Paris
+  const { app, gladys, clock, timers } = await setup({
+    routes: r,
+    devices: [created()],
+    now: start,
+  });
+  /** Day d: 0.06 to 0.08 kWh from the grid, counted from 1 Wh at midnight, rising 08:00-20:00. */
+  const finals = [60, 70, 80];
+  const counter = (day, minute) => {
+    const final = finals[day % 3];
+    const share = Math.min(Math.max(0, minute - 480), 720) / 720;
+    return Math.max(1, Math.round(final * share));
+  };
+  const world = (day, minute) => energy(r, { grid_consumed: counter(day, minute), pv: 0 });
+  world(0, 0);
+  await app.start(CONFIG);
+  await app.idle();
+  for (let day = 0; day < 7; day += 1) {
+    for (let minute = day === 0 ? 1 : 0; minute < 1440; minute += 1) {
+      clock.now = start + (day * 1440 + minute) * MINUTE;
+      world(day, minute);
+      await timers.runIntervals();
+    }
+  }
+  const values = gladys.fake.states
+    .filter((s) => s.device_feature_external_id === F('consumption_index'))
+    .map((s) => s.state);
+  let counted = 0;
+  for (let i = 1; i < values.length; i += 1) {
+    if (values[i] > values[i - 1]) counted += values[i] - values[i - 1];
+  }
+  // Real: the seven finals, minus the 1 Wh of the first read.
+  const real = [0, 1, 2, 3, 4, 5, 6].reduce((sum, d) => sum + finals[d % 3], 0) / 1000 - 0.001;
+  assert.ok(counted <= real + 1e-9, `counted ${counted} > real ${real}`);
+  assert.ok(counted >= real - 7 * 0.01, `counted ${counted}, real ${real}`);
+});

@@ -129,14 +129,20 @@ integration and kept across restarts.
   corrects itself and goes on once the counter is back above it; only the new
   energy is counted. The button answers that a drop is never accepted.
 - Saving the configuration never accepts anything.
-  For the production index, when the counter of the day only moves by steps
-  (every few minutes), the rise of a step is judged on the time since the
-  previous step (20 min at most, never above 36 kW), not on a single minute.
+
+For the production index, when the counter of the day only moves by steps
+(every few minutes), the rise of a step is judged on the time since the
+previous step (20 min at most, never above 36 kW), not on a single minute.
+Longer steps, or steps too large for 36 kW, may still lose the rest of a day
+(as in 0.1.1).
 
 **Risk left (it would count too much)**:
 
 - the day before shown again more than 0.1 kWh away from the last value
-  read, above or below, is taken as a rise of the day;
+  read, above or below, is taken as a rise of the day, or shown again while the
+  counter of the day is already within 0.1 kWh of it (small days): 0.1 kWh at
+  most; for a house that draws very little from the grid, the cost of the band
+  (about 0.1 kWh a day) weighs a lot in proportion;
 - any false read that fits the margin goes through: for the consumption,
   36 kW × the length of the silence (a single false value after 30 min
   without reads: +6.35 kWh measured); for the production, 36 kW for the

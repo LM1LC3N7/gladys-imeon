@@ -136,15 +136,20 @@ redémarrage.
   compteur l'a rattrapé ; seule l'énergie nouvelle est comptée. Le bouton
   répond qu'une baisse n'est jamais acceptée.
 - Enregistrer la configuration n'accepte jamais rien.
-  Pour l'index de production, quand le compteur du jour n'avance que par
-  paliers (toutes les quelques minutes), la hausse d'un palier est jugée sur le
-  temps écoulé depuis le palier précédent (20 min au plus, jamais au-delà de
-  36 kW), pas sur une seule minute.
+
+Pour l'index de production, quand le compteur du jour n'avance que par paliers
+(toutes les quelques minutes), la hausse d'un palier est jugée sur le temps
+écoulé depuis le palier précédent (20 min au plus, jamais au-delà de 36 kW),
+pas sur une seule minute. Des paliers plus longs, ou trop forts pour 36 kW,
+peuvent encore faire perdre le reste d'une journée (comme en 0.1.1).
 
 **Risque restant (il compterait trop)** :
 
 - une veille réaffichée à plus de 0,1 kWh de la dernière valeur lue, au-dessus
-  ou au-dessous, est prise comme une hausse du jour ;
+  ou au-dessous, est prise comme une hausse du jour, ou réaffichée alors que le
+  compteur du jour en est déjà à moins de 0,1 kWh (petites journées) : au plus
+  0,1 kWh ; pour une maison qui tire très peu du réseau, le coût de la bande
+  (environ 0,1 kWh par jour) pèse lourd en proportion ;
 - toute lecture fausse qui tient dans la marge passe : pour la consommation,
   36 kW × la durée du silence (une seule valeur fausse après 30 min sans
   lecture : +6,35 kWh mesurés) ; pour la production, 36 kW les 7 premiers
