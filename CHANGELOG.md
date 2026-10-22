@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-22
+
 ### Fixed
 
 - "Accept the held index" no longer accepts a DROP of an index built from the
@@ -76,5 +78,6 @@ the notes of the version's GitHub Release.
   `THIRD_PARTY_NOTICES.md` (Apache-2.0 notice of imeon_inverter_api), shipped
   in the image.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-imeon/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/LM1LC3N7/gladys-imeon/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/LM1LC3N7/gladys-imeon/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/LM1LC3N7/gladys-imeon/releases/tag/v0.1.1

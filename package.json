@@ -1,6 +1,6 @@
 {
   "name": "gladys-imeon",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "IMEON hybrid inverters for Gladys Assistant: solar production, battery, grid and consumption read through the local API of the inverter, energy indexes fed to the energy monitoring. Read-only.",
   "type": "module",
