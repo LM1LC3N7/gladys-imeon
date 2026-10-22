@@ -329,9 +329,10 @@ const positive = (value) => (isNumber(value) && value >= 0 ? value : undefined);
  * The states of a poll. `pages`: the parsed pages read this time (a page
  * missing gives nothing), `data`: the `/data` page (limits), `indexes`: the
  * values the guards let through (`{ consumption, production }`, undefined:
- * not published this time).
+ * not published this time). keptOut: the index names whose counter of the
+ * day was the day before shown again (fix 0.1.2): that counter is not sent.
  */
-export function pollStates(external, pages, data, indexes = {}) {
+export function pollStates(external, pages, data, indexes = {}, keptOut = []) {
   const { battery, grid, pv, input, output, meter, temp, energy, forecast } = pages;
   const { monitoring, monitoringMinute: minute, manager } = pages;
   return [
@@ -373,8 +374,13 @@ export function pollStates(external, pages, data, indexes = {}) {
     ...(isNumber(indexes.production) && indexes.production > 0
       ? state(external, FEATURE.PRODUCTION_INDEX, indexes.production, 3)
       : []),
-    ...state(external, FEATURE.DAY_PV, energy?.pv, 3),
-    ...state(external, FEATURE.DAY_GRID_CONSUMED, energy?.gridConsumed, 3),
+    ...state(external, FEATURE.DAY_PV, keptOut.includes('production') ? undefined : energy?.pv, 3),
+    ...state(
+      external,
+      FEATURE.DAY_GRID_CONSUMED,
+      keptOut.includes('consumption') ? undefined : energy?.gridConsumed,
+      3,
+    ),
     ...state(external, FEATURE.DAY_GRID_INJECTED, energy?.gridInjected, 3),
     ...state(external, FEATURE.DAY_BUILDING, energy?.building, 3),
     ...state(external, FEATURE.DAY_BATTERY_STORED, energy?.batteryStored, 3),

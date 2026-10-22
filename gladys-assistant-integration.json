@@ -80,8 +80,8 @@
       "timeout_seconds": 30,
       "label": { "en": "Accept the held index", "fr": "Accepter l'index retenu" },
       "description": {
-        "en": "Only when the status shows an energy index held back (a jump or a drop) and it is right: takes exactly the value shown. A jump is then counted at once; a drop counts nothing. Saving the configuration never accepts it.",
-        "fr": "Seulement quand l'état affiche un index d'énergie retenu (un saut ou une baisse) et qu'il est juste : prend exactement la valeur affichée. Un saut est alors compté d'un coup ; une baisse ne compte rien. Enregistrer la configuration ne l'accepte jamais."
+        "en": "Only when the status shows an energy index that jumped and the jump is right: takes exactly the value shown, counted at once. A drop is never accepted: it corrects itself. Saving the configuration never accepts anything.",
+        "fr": "Seulement quand l'état affiche un index d'énergie qui a sauté et que le saut est juste : prend exactement la valeur affichée, comptée d'un coup. Une baisse n'est jamais acceptée : elle se corrige seule. Enregistrer la configuration n'accepte jamais rien."
       }
     }
   ]

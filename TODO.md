@@ -170,6 +170,31 @@
 - **/data writes** (review 1, M4): the saves are queued, never two on the
   same temporary file.
 
+- **Fix 0.1.2** (found in the review of gladys-zeversolar, same daily.js
+  and guard):
+  - I2 applies: a drop of a built index is never accepted (both indexes),
+    the status says it corrects itself, the button answers "never accepted";
+    jumps are still accepted. Tested: the climb back counts only the energy
+    above the last value accepted.
+  - B1 applies, done the same way (`src/dayBefore.js`, band ±0.1 kWh,
+    marks `dayBefore` / `staleSeen` kept in `/data` with each index): an
+    IMEON stays powered at night, so a "sunrise" is rare, but a reboot of the
+    inverter (or its midnight late on ours) may show the counter of the day
+    before again; given to daily.js it would be taken as a rise and counted
+    twice. The counter of the day is not sent for a read kept out.
+  - I3 applies to the solar production index only: margin learned from the
+    solar power (`/api/pv` total, 1.5 × the 30-day peak once 7 days known,
+    2 to 36 kW, outliers only when seen twice, an aberrant power above
+    40 kW never, a read widened by its own plausible power), the same for the
+    daily index and the guard, rebuilt from their state when it changes (an
+    acceptance waiting is then lost: a second click, never a kWh too much).
+    No "peak power" field: the learning needs no setting. NOT for the grid
+    consumption index: what the house draws is capped by the subscribed power
+    (36 kVA at most in France), not by the installation, and the unit of the
+    grid power page (`/api/monitor?time=minute`) is still to confirm; a margin
+    learned from a doubtful power could stall the billed index for whole
+    days. It keeps 36 kW.
+
 ## Ideas
 
 - The timeline messages (`/api/timeline`) as a scene trigger.

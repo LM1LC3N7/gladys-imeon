@@ -117,9 +117,10 @@ export const T = {
     held: (name, { direction, from, to }) => {
       const index = INDEX[name];
       if (direction === 'down') {
+        // A drop of the built index is never accepted (fix 0.1.2): it corrects itself.
         return {
-          en: `The ${index.en} dropped from ${kwh(from)} to ${kwh(to)} kWh: held back, the last accepted value is sent again. If it is right, click "Accept the held index" in the configuration of the integration: nothing is counted for the drop, the index goes on from there. Saving the configuration accepts nothing.`,
-          fr: `L’${index.fr} a baissé de ${kwh(from)} à ${kwh(to)} kWh : retenu, la dernière valeur acceptée est renvoyée. Si c’est juste, cliquez sur « Accepter l’index retenu » dans la configuration de l’intégration : rien n’est compté pour la baisse, l’index repart de là. Enregistrer la configuration n’accepte rien.`,
+          en: `The ${index.en}, built from the counter of the day, went back from ${kwh(from)} to ${kwh(to)} kWh: held back, the last accepted value is sent again. Nothing to do: it corrects itself and goes on once the counter is back above it (what is not back is not counted). It is never accepted.`,
+          fr: `L’${index.fr}, construit à partir du compteur du jour, est revenu de ${kwh(from)} à ${kwh(to)} kWh : retenu, la dernière valeur acceptée est renvoyée. Rien à faire : il se corrige seul et reprend quand le compteur l’a rattrapé (ce qui ne revient pas n’est pas compté). Il n’est jamais accepté.`,
         };
       }
       const diff = kwh(to - from);
@@ -134,21 +135,28 @@ export const T = {
       en: 'No index is held back: nothing to accept.',
       fr: 'Aucun index n’est retenu : rien à accepter.',
     },
-    /** `accepted`: [{ name, direction, from, to }]. */
-    done: (accepted) => ({
+    /** Only drops held: never accepted (fix 0.1.2), they correct themselves. */
+    drop: (names) => ({
+      en: `The index held back (${names.map((n) => INDEX[n].en).join(', ')}) is a drop: it is never accepted, it corrects itself and goes on once the counter of the day is back above it. Nothing to accept.`,
+      fr: `L’index retenu (${names.map((n) => INDEX[n].fr).join(', ')}) est une baisse : elle n’est jamais acceptée, l’index se corrige seul et reprend quand le compteur du jour l’a rattrapé. Rien à accepter.`,
+    }),
+    /** `accepted`: the jumps taken [{ name, from, to }]; `drops`: the names of drops never taken. */
+    done: (accepted, drops = []) => ({
       en: accepted
-        .map(({ name, direction, from, to }) =>
-          direction === 'down'
-            ? `Accepted: the ${INDEX[name].en} goes from ${kwh(from)} down to ${kwh(to)} kWh at the next read; 0 kWh is counted for the drop.`
-            : `Accepted: the ${INDEX[name].en} ${kwh(to)} kWh will be sent at the next read, and ${kwh(to - from)} kWh (plus what comes meanwhile) will be counted at once.`,
+        .map(
+          ({ name, from, to }) =>
+            `Accepted: the ${INDEX[name].en} ${kwh(to)} kWh will be sent at the next read, and ${kwh(to - from)} kWh (plus what comes meanwhile) will be counted at once.`,
         )
+        .concat(drops.length > 0 ? ['A drop is never accepted: it corrects itself.'] : [])
         .concat('A different value stays held.')
         .join(' '),
       fr: accepted
-        .map(({ name, direction, from, to }) =>
-          direction === 'down'
-            ? `Accepté : l’${INDEX[name].fr} passe de ${kwh(from)} à ${kwh(to)} kWh à la prochaine lecture ; 0 kWh est compté pour la baisse.`
-            : `Accepté : l’${INDEX[name].fr} ${kwh(to)} kWh sera envoyé à la prochaine lecture, et ${kwh(to - from)} kWh (plus ce qui vient d’ici là) seront comptés d’un coup.`,
+        .map(
+          ({ name, from, to }) =>
+            `Accepté : l’${INDEX[name].fr} ${kwh(to)} kWh sera envoyé à la prochaine lecture, et ${kwh(to - from)} kWh (plus ce qui vient d’ici là) seront comptés d’un coup.`,
+        )
+        .concat(
+          drops.length > 0 ? ['Une baisse n’est jamais acceptée : elle se corrige seule.'] : [],
         )
         .concat('Une autre valeur reste retenue.')
         .join(' '),

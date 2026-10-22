@@ -104,16 +104,34 @@ Règle : chaque doute compte moins, jamais plus.
   compterait la veille une seconde fois : il faut un onduleur dont le minuit
   a plus de 3 h de retard, une coupure, un compteur à presque 0 et un retour. La garde ci-dessous retient encore tout saut de l'index.
 
-Chaque index passe ensuite la **garde** reprise de l'intégration P1 Monitor :
-jamais 0 ; une hausse plausible (au plus 36 kW en moyenne depuis la dernière
-valeur, plus 0,5 kWh) passe ; une baisse ou un saut est **retenu** (la
-dernière valeur acceptée est renvoyée), affiché dans l'état de l'intégration
-et gardé après un redémarrage. Seul le bouton **Accepter l'index retenu** le
-prend, et seulement pour la valeur affichée (plus ce qui a pu venir depuis) :
-un saut est alors compté d'un coup, une baisse ne compte rien. Enregistrer la
-configuration n'accepte jamais rien.
+Le compteur de la veille réaffiché (un redémarrage de l'onduleur) est gardé
+hors de l'index : après minuit, une valeur à 0,1 kWh près de la dernière lue
+tant que l'onduleur n'a pas commencé son nouveau jour ; plus tard le même
+jour, une valeur à 0,1 kWh près de celle de la veille alors que le compteur
+du jour est encore en dessous. Le compteur du jour n'est pas envoyé non plus
+pour cette lecture. Coût : jusqu'à 0,1 kWh quand deux jours finissent à moins
+de 0,1 kWh l'un de l'autre.
 
-Si vous supprimez puis recréez l'appareil, ses index repartent de zéro.
+Chaque index passe ensuite la **garde** reprise de l'intégration P1 Monitor :
+jamais 0 ; une hausse plausible passe (au plus 36 kW en moyenne depuis la
+dernière valeur, plus 0,5 kWh, pour l'index de consommation réseau ; pour
+l'index de production solaire, 1,5 × la plus forte puissance solaire des 30
+derniers jours une fois 7 jours connus, entre 2 et 36 kW, et 36 kW avant) ;
+une baisse ou un saut est **retenu** (la dernière valeur acceptée est
+renvoyée), affiché dans l'état de l'intégration et gardé après un
+redémarrage.
+
+- Un **saut** n'est pris que par le bouton **Accepter l'index retenu**, et
+  seulement pour la valeur affichée (plus ce qui a pu venir depuis) : il est
+  alors compté d'un coup.
+- Une **baisse** n'est **jamais acceptée** : l'index construit à partir du
+  compteur du jour ne baisse que lorsqu'il reprend des valeurs déjà envoyées
+  (ou quand `/data` est plus ancien que Gladys), jamais parce qu'un compteur
+  a été remplacé. Rien à faire : il se corrige seul et reprend quand le
+  compteur l'a rattrapé ; seule l'énergie nouvelle est comptée. Le bouton
+  répond qu'une baisse n'est jamais acceptée.
+- Enregistrer la configuration n'accepte jamais rien.
+  Si vous supprimez puis recréez l'appareil, ses index repartent de zéro.
 
 ## Erreurs et pauses
 

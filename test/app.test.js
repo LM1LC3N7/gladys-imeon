@@ -429,3 +429,47 @@ test('every connection publishes the status and the device again', async () => {
   assert.ok(gladys.fake.discoveredDevices.length >= 1);
   assert.ok(discovered >= 1);
 });
+
+test('fix 0.1.2: a drop of the built index is never accepted; only the new energy counts', async () => {
+  const r = imeonRoutes();
+  energy(r, { grid_consumed: 6000 });
+  // /data older than Gladys: the built index (990) is under the one Gladys holds (1000).
+  const store = createMemoryStore({
+    serial: SERIAL,
+    indexes: {
+      [F('consumption_index')]: {
+        guard: null,
+        daily: { offset: 984, today: 6, readAt: NOW - MINUTE, readDay: '2026-10-20' },
+      },
+    },
+  });
+  const device = created({ index: { value: 1000, at: NOW - MINUTE } });
+  const { app, gladys, tick } = await setup({ routes: r, devices: [device], store });
+  await app.start(CONFIG);
+  await app.idle();
+  assert.equal(last(gladys, 'consumption_index'), 1000, 'the last accepted value, never the drop');
+  assert.match(status(gladys).message.fr, /est revenu de 1000 à 990 kWh/);
+  assert.match(status(gladys).message.fr, /Rien à faire/);
+  assert.doesNotMatch(status(gladys).message.fr, /cliquez/);
+  // The button never takes it.
+  const answer = await gladys.fake.action(ACTIONS.ACCEPT_HELD);
+  assert.match(answer.data.message.en, /never accepted/);
+  assert.match(answer.data.message.fr, /jamais acceptée/);
+  // The counter climbs back: nothing published below 1000, then only the new energy.
+  const sent = () =>
+    gladys.fake.states
+      .filter((s) => s.device_feature_external_id === F('consumption_index'))
+      .map((s) => s.state);
+  for (let i = 1; i <= 22; i += 1) {
+    energy(r, { grid_consumed: 6000 + i * 500 });
+    await tick();
+  }
+  assert.equal(last(gladys, 'consumption_index'), 1001);
+  let counted = 0;
+  const values = sent();
+  for (let i = 1; i < values.length; i += 1) {
+    if (values[i] > values[i - 1]) counted += values[i] - values[i - 1];
+  }
+  assert.equal(Math.round(counted * 1000) / 1000, 1, 'only the energy above 1000 kWh is counted');
+  assert.ok(Math.min(...values) >= 1000);
+});

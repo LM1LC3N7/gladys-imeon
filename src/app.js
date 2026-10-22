@@ -36,7 +36,17 @@ import {
   TEST_ANSWER_WITHIN,
   TIME_ZONE,
 } from './constants.js';
-import { DailyIndex } from './daily.js';
+import { DailyIndex, localParts } from './daily.js';
+import {
+  keptOut,
+  maxKwOf,
+  noteNewDay,
+  plausiblePeak,
+  readMaxKw,
+  validPeaks,
+  validRef,
+  withPeak,
+} from './dayBefore.js';
 import { FEATURE, buildDevice, capabilitiesOfDevice, ids, pollStates, round } from './devices.js';
 import { IndexGuard } from './guard.js';
 import { T } from './i18n.js';
@@ -52,17 +62,18 @@ const INDEXES = [
   { name: 'production', key: FEATURE.PRODUCTION_INDEX, day: (energy) => energy?.pv },
 ];
 
-const GUARD_LIMITS = { maxKw: INDEX_MAX_KW, slackKwh: INDEX_SLACK_KWH };
-const DAILY_LIMITS = {
+/** The limits of the guard and of the daily index of an index: the SAME `maxKw`. */
+const guardLimits = (maxKw) => ({ maxKw, slackKwh: INDEX_SLACK_KWH });
+const dailyLimits = (maxKw) => ({
   resetMaxKwh: DAY_RESET_MAX_KWH,
   undoWithinMs: DAY_RESET_UNDO_WITHIN,
-  maxKw: INDEX_MAX_KW,
+  maxKw,
   slackKwh: INDEX_SLACK_KWH,
   windowBefore: DAY_WINDOW_BEFORE,
   windowAfter: DAY_WINDOW_AFTER,
   gapMs: 3 * POLL_INTERVAL,
   timeZone: TIME_ZONE,
-};
+});
 
 /** Errors that stop the whole read (the inverter itself does not answer well). */
 const FATAL = new Set(['timeout', 'unreachable', 'rate_limited', 'server', 'auth_refused']);
@@ -143,6 +154,11 @@ export class ImeonApp {
     const kept = store.load();
     this.pause = validHold(kept.pause, now(), PAUSE_MAX);
     this.authStop = validHold(kept.authStop, now(), AUTH_RETRY_MAX);
+    /** The daily solar power peaks, for the margin of the production index (fix 0.1.2). */
+    this.peaks = validPeaks(kept.peaks);
+    this.peakState = { outlier: undefined };
+    /** By index feature external id: the marks of the day before (fix 0.1.2). */
+    this.refs = new Map();
     if (typeof kept.serial === 'string' && SERIAL.test(kept.serial)) {
       this.info = { serial: kept.serial };
     }
@@ -303,13 +319,18 @@ export class ImeonApp {
   async saveState() {
     const indexes = {};
     for (const [id, guard] of this.guards) {
-      indexes[id] = { guard: guard.state(), daily: this.dailies.get(id)?.state() ?? null };
+      indexes[id] = {
+        guard: guard.state(),
+        daily: this.dailies.get(id)?.state() ?? null,
+        ref: this.refs.get(id) ?? null,
+      };
     }
     const kept = this.store.load();
     const state = {
       serial: this.info?.serial ?? null,
       pause: this.pause ?? null,
       authStop: this.authStop ?? null,
+      peaks: this.peaks,
       indexes: { ...(kept.indexes ?? {}), ...indexes },
     };
     const key = JSON.stringify(state);
@@ -374,6 +395,7 @@ export class ImeonApp {
         const id = external.feature(key);
         this.guards.delete(id);
         this.dailies.delete(id);
+        this.refs.delete(id);
         if (kept.indexes) delete kept.indexes[id];
       }
       await this.store
@@ -603,15 +625,38 @@ export class ImeonApp {
     });
   }
 
-  /** The guard of an index of the created device, from Gladys and /data. */
+  /**
+   * The margin of an index now (kW): learned from the solar power for the
+   * production index, INDEX_MAX_KW for the grid consumption index.
+   */
+  maxKwFor(id) {
+    return id === this.external()?.feature(FEATURE.PRODUCTION_INDEX)
+      ? maxKwOf(this.peaks)
+      : INDEX_MAX_KW;
+  }
+
+  /**
+   * The guard of an index of the created device, from Gladys and /data, with
+   * its daily index and the marks of the day before. When the margin changed,
+   * both are built again from their own state with the new one.
+   */
   guardOf(created, id) {
+    const kw = this.maxKwFor(id);
     if (!this.guards.has(id)) {
       const saved = this.store.load().indexes?.[id];
       this.guards.set(
         id,
-        new IndexGuard(lastValueOf(created, id), saved?.guard, this.now(), GUARD_LIMITS),
+        new IndexGuard(lastValueOf(created, id), saved?.guard, this.now(), guardLimits(kw)),
       );
-      this.dailies.set(id, new DailyIndex(saved?.daily, DAILY_LIMITS, this.now()));
+      this.dailies.set(id, new DailyIndex(saved?.daily, dailyLimits(kw), this.now()));
+      this.refs.set(id, validRef(saved?.ref));
+    } else if (this.guards.get(id).maxKw !== kw) {
+      const now = this.now();
+      this.guards.set(
+        id,
+        new IndexGuard(undefined, this.guards.get(id).state(), now, guardLimits(kw)),
+      );
+      this.dailies.set(id, new DailyIndex(this.dailies.get(id).state(), dailyLimits(kw), now));
     }
     return this.guards.get(id);
   }
@@ -625,13 +670,26 @@ export class ImeonApp {
     const external = this.external();
     const now = this.now();
     const values = {};
+    const keptOutNames = [];
     this.noIndex = [];
+    // The solar power of this read, learned as a peak for the margin of the
+    // production index (fix 0.1.2): an aberrant one never widens it.
+    const pvPower = pages.pv?.total;
+    const peak = plausiblePeak(this.peaks, pvPower, this.peakState);
+    if (peak !== undefined) {
+      this.peaks = withPeak(this.peaks, localParts(now, TIME_ZONE).date, peak);
+    }
     for (const { name, key, day } of INDEXES) {
       const id = external.feature(key);
       const guard = this.guardOf(created, id);
+      const daily = this.dailies.get(id);
+      const ref = this.refs.get(id);
       const today = day(pages.energy);
-      if (today === undefined) {
-        // No energy page this time: the last accepted value keeps its date in Gladys.
+      if (today === undefined || keptOut(daily, ref, today, now)) {
+        // No energy page this time, or the counter of the day before shown
+        // again (fix 0.1.2): not a counter read (its time is not moved),
+        // nothing counted; the last accepted value keeps its date in Gladys.
+        if (today !== undefined) keptOutNames.push(name);
         values[name] = guard.held ? guard.last?.value : undefined;
         continue;
       }
@@ -641,17 +699,34 @@ export class ImeonApp {
       const mono = this.monotonic();
       const previous = this.counterReadAt.get(id);
       this.counterReadAt.set(id, mono);
-      const built = this.dailies.get(id).read(today, now, guard.last ?? lastValueOf(created, id), {
-        elapsedMs: previous === undefined ? undefined : mono - previous,
-      });
-      const total = built === undefined ? undefined : round(built, 3);
+      // The margin of THIS read: for the production index, widened by a
+      // plausible solar power above the learned peak; restored at once (no
+      // await in between), the shared classes keep their own code.
+      const kw = guard.maxKw;
+      const readKw = name === 'production' ? readMaxKw(this.peaks, pvPower) : kw;
+      daily.limits.maxKw = readKw;
+      guard.maxKw = readKw;
+      let total;
+      let plausible;
+      try {
+        const built = daily.read(today, now, guard.last ?? lastValueOf(created, id), {
+          elapsedMs: previous === undefined ? undefined : mono - previous,
+        });
+        noteNewDay(daily, ref, now);
+        total = built === undefined ? undefined : round(built, 3);
+        plausible = total !== undefined && guard.accept(total, now);
+      } finally {
+        daily.limits.maxKw = kw;
+        guard.maxKw = kw;
+      }
       if (total === undefined) {
         this.noIndex.push(name);
       }
-      const plausible = total !== undefined && guard.accept(total, now);
-      if (total !== undefined && !plausible && total > 0) {
+      if (total !== undefined && !plausible && guard.held) {
         this.logger.warn(
-          `IMEON ${name} index ${guard.held?.direction === 'down' ? 'drop' : 'jump'} held back: the "Accept the held index" button takes it`,
+          guard.held.direction === 'down'
+            ? `IMEON ${name} index drop held back: it corrects itself, never accepted`
+            : `IMEON ${name} index jump held back: the "Accept the held index" button takes it`,
         );
       }
       // While a value is held, the last accepted one is sent again (no delta for the core).
@@ -660,7 +735,7 @@ export class ImeonApp {
     // The built indexes and their guards are in /data BEFORE Gladys gets the
     // values: a crash in between never sends an index /data does not know.
     await this.saveState();
-    const states = pollStates(external, pages, this.info, values);
+    const states = pollStates(external, pages, this.info, values, keptOutNames);
     // Only the features the created device has (they are fixed at its creation).
     const features = created.features ? new Set(created.features.map((f) => f.external_id)) : null;
     const allowed = features
@@ -686,22 +761,30 @@ export class ImeonApp {
     if (!created) {
       return T.accept.nothing;
     }
+    // A DROP is never accepted (fix 0.1.2, as gladys-zeversolar): the built
+    // index only drops when the daily index takes back values already
+    // published, or when /data is older than Gladys; it is never a new meter.
+    // Taking it would count the climb back twice. It corrects itself.
+    const drops = [];
     const accepted = INDEXES.flatMap(({ name, key }) => {
-      const taken = this.guardOf(created, this.external().feature(key)).acceptHeld();
+      const guard = this.guardOf(created, this.external().feature(key));
+      if (guard.held?.direction === 'down') {
+        drops.push(name);
+        return [];
+      }
+      const taken = guard.acceptHeld();
       return taken ? [{ name, ...taken }] : [];
     });
     if (accepted.length === 0) {
-      return T.accept.nothing;
+      return drops.length > 0 ? T.accept.drop(drops) : T.accept.nothing;
     }
-    for (const { name, direction } of accepted) {
-      this.logger.info(
-        `IMEON ${name} index ${direction === 'down' ? 'drop' : 'jump'} accepted by the user`,
-      );
+    for (const { name } of accepted) {
+      this.logger.info(`IMEON ${name} index jump accepted by the user`);
     }
     // Published at the next read: now, unless a read was made less than a
     // poll ago or a pause or a stop runs (then at the next poll).
     this.firstRun = this.run(this.generation, () => this.tick());
-    return T.accept.done(accepted);
+    return T.accept.done(accepted, drops);
   }
 
   /** The test button: log in and read the `/data` page once. */

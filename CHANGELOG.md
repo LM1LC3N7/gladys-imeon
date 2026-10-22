@@ -10,6 +10,22 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- "Accept the held index" no longer accepts a DROP of an index built from the
+  counter of the day: taking it counted the climb back twice. A drop is never
+  a new meter here; it corrects itself and only the new energy is counted.
+  The status says "nothing to do", the button answers "never accepted"; jumps
+  are still accepted as before.
+- The counter of the day before shown again by the inverter (after a reboot,
+  or after midnight before its new day) is kept out of the index when it is
+  within 0.1 kWh of the last value read or of the day before (it was counted
+  as a rise of the day), and the counter of the day is not sent for that read.
+- The margin of the solar production index follows the installation: 1.5 ×
+  the highest solar power of the last 30 days once 7 days are known (2 to
+  36 kW), instead of 36 kW, so a false counter after a silence is no longer
+  taken on a small installation.
+
 ## [0.1.1] - 2026-10-20
 
 ### Added

@@ -98,6 +98,28 @@ export const DAY_RESET_UNDO_WITHIN = 3 * HOUR;
 /** The local midnight: the TZ of the container, else the inverters' home market. */
 export const TIME_ZONE = process.env.TZ || 'Europe/Paris';
 
+/**
+ * The day before shown again (src/dayBefore.js): a value within this band of
+ * it (kWh, above and below) is kept out of the index. Cost: up to 0.1 kWh at
+ * the end of a day that ends within 0.1 kWh of the day before.
+ */
+export const STALE_BAND_KWH = 0.1;
+export const STALE_BELOW_KWH = STALE_BAND_KWH;
+/**
+ * The margin of the solar production index, learned (src/dayBefore.js):
+ * 1.5 × the highest solar power of the last 30 days once 7 days are known,
+ * bounded to these (kW); INDEX_MAX_KW until then. The grid consumption index
+ * keeps INDEX_MAX_KW (TODO "Decisions").
+ */
+export const MAX_KW_MIN = 2;
+export const MAX_KW_MAX = INDEX_MAX_KW;
+export const PEAK_DAYS_MIN = 7;
+export const PEAK_DAYS_KEPT = 30;
+/** A power above this many times the peak of the last 30 days is a glitch unless seen twice in a row. */
+export const PEAK_OUTLIER = 1.5;
+/** A solar power above this (W) is never a peak: above any IMEON model (65535 W, an error value). */
+export const PLAUSIBLE_POWER_MAX = 40_000;
+
 /** A power above this (W) is a glitch. */
 export const POWER_MAX = 100_000;
 /** A counter of the day above this (kWh) is a glitch. */

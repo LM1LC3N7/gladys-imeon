@@ -100,15 +100,31 @@ Rule: every doubt counts less, never more.
   whose midnight is more than 3 h late, a cut, a counter near 0 and a return. The guard below still
   holds any jump of the index.
 
-Each index then passes the **guard** taken from the P1 Monitor integration:
-never 0; a plausible rise (at most 36 kW on average since the last value,
-plus 0.5 kWh) goes through; a drop or a jump is **held** (the last accepted
-value is sent again), shown in the status of the integration and kept across
-restarts. Only the **Accept the held index** button takes it, and only for the
-value shown (plus what may have come since): a jump is then counted at once, a
-drop counts nothing. Saving the configuration never accepts anything.
+The counter of the day before shown again (a reboot of the inverter) is kept
+out of the index: after midnight, a value within 0.1 kWh of the last one read
+while the inverter has not started its new day; later the same day, a value
+within 0.1 kWh of the day before while the counter of the day is still under
+it. The counter of the day is not sent either for that read. Cost: up to
+0.1 kWh when two days end within 0.1 kWh of each other.
 
-If you delete and create the device again, its indexes start from scratch.
+Each index then passes the **guard** taken from the P1 Monitor integration:
+never 0; a plausible rise goes through (at most 36 kW on average since the
+last value, plus 0.5 kWh, for the grid consumption index; for the solar
+production index, 1.5 × the highest solar power of the last 30 days once 7
+days are known, between 2 and 36 kW, and 36 kW before); a drop or a jump is
+**held** (the last accepted value is sent again), shown in the status of the
+integration and kept across restarts.
+
+- A **jump** is only taken by the **Accept the held index** button, and only
+  for the value shown (plus what may have come since): it is then counted at
+  once.
+- A **drop** is **never accepted**: the index built from the counter of the
+  day only drops when it takes back values already sent (or when `/data` is
+  older than Gladys), never because a meter was replaced. Nothing to do: it
+  corrects itself and goes on once the counter is back above it; only the new
+  energy is counted. The button answers that a drop is never accepted.
+- Saving the configuration never accepts anything.
+  If you delete and create the device again, its indexes start from scratch.
 
 ## Errors and pauses
 
