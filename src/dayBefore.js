@@ -12,8 +12,11 @@
 //     inverter has not started its new day yet);
 //   - later the same local day as a new day, near the value of the day before
 //     while today's counter taken is still under it.
-//   Cost: up to 0.1 kWh at the end of a day that ends within 0.1 kWh of the
-//   day before.
+//   Cost: about 0.1 kWh (the band plus one read) at the end of a day that
+//   ends within 0.1 kWh of the day before. The protection starts at the first
+//   midnight after an update from 0.1.1 (no mark before), or at once when the
+//   update falls within 3 h of a new day (the mark is drawn from the daily
+//   index's pending undo, markFromUndo).
 // - The margin of the production index (zeversolar review 1, I3): 1.5 × the
 //   highest solar power of the last 30 days, once 7 days are known, bounded
 //   to MAX_KW_MIN..MAX_KW_MAX; INDEX_MAX_KW until then. The same for the
@@ -161,7 +164,9 @@ export function keptOut(daily, ref, today, now) {
   const before = ref.dayBefore;
   if (
     before &&
-    before.day === day &&
+    // The night of the new day, or the local date: an inverter whose midnight
+    // comes before ours resets at 23:xx (review 0.1.2, B1).
+    (before.day === day || before.day === daily.window(now).key) &&
     s.today < before.value - STALE_BAND_KWH &&
     today >= before.value - STALE_BELOW_KWH &&
     today <= before.value + STALE_BAND_KWH
@@ -177,7 +182,23 @@ export function noteNewDay(daily, ref, now) {
   if (!s?.undo || s.undo.at !== now) {
     return;
   }
-  const day = daily.local(now).date;
+  // The night of the new day (the date after its midnight), not the local
+  // date: an inverter whose midnight comes before ours resets at 23:xx and
+  // the mark must hold for the next day (review 0.1.2, B1).
+  const day = daily.window(now).key;
   const seen = ref.staleSeen?.day === day ? ref.staleSeen.value : 0;
   ref.dayBefore = { day, value: Math.max(s.undo.prevToday, seen) };
+}
+
+/**
+ * A missing mark drawn from the daily index (review 0.1.2, m1): after an
+ * update from 0.1.1 within 3 h of a new day, its pending undo knows the value
+ * of the day before.
+ */
+export function markFromUndo(daily, ref) {
+  const undo = daily.state()?.undo;
+  if (ref.dayBefore || !undo) {
+    return;
+  }
+  ref.dayBefore = { day: daily.window(undo.at).key, value: undo.prevToday };
 }

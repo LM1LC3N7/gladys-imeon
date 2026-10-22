@@ -33,12 +33,14 @@ import {
   RETRY_MAX,
   RETRY_MIN,
   STATE_HEARTBEAT,
+  STEP_COVER_MAX,
   TEST_ANSWER_WITHIN,
   TIME_ZONE,
 } from './constants.js';
 import { DailyIndex, localParts } from './daily.js';
 import {
   keptOut,
+  markFromUndo,
   maxKwOf,
   noteNewDay,
   plausiblePeak,
@@ -143,6 +145,10 @@ export class ImeonApp {
     this.dailies = new Map();
     /** By index feature external id: monotonic time of the last counter read. */
     this.counterReadAt = new Map();
+    /** By index feature external id: `{ value, at }` of the last change of its counter. */
+    this.counterChangedAt = new Map();
+    /** Index names whose counter was the day before shown again at the last read. */
+    this.keptOutNames = [];
     /** Index names with no index this read (a drop of the counter that is no new day). */
     this.noIndex = [];
     this.failingPages = [];
@@ -609,6 +615,7 @@ export class ImeonApp {
     const notes = [];
     if (this.failingPages.length > 0) notes.push(T.notes.pages(this.failingPages));
     if (this.noIndex.length > 0) notes.push(T.notes.noIndex(this.noIndex));
+    if (this.keptOutNames.length > 0) notes.push(T.notes.stale(this.keptOutNames));
     notes.push(...this.heldNotes());
     return T.ok(this.config.address, notes);
   }
@@ -650,6 +657,8 @@ export class ImeonApp {
       );
       this.dailies.set(id, new DailyIndex(saved?.daily, dailyLimits(kw), this.now()));
       this.refs.set(id, validRef(saved?.ref));
+      // After an update from 0.1.1 within 3 h of a new day: the mark from its undo (m1).
+      markFromUndo(this.dailies.get(id), this.refs.get(id));
     } else if (this.guards.get(id).maxKw !== kw) {
       const now = this.now();
       this.guards.set(
@@ -703,7 +712,29 @@ export class ImeonApp {
       // plausible solar power above the learned peak; restored at once (no
       // await in between), the shared classes keep their own code.
       const kw = guard.maxKw;
-      const readKw = name === 'production' ? readMaxKw(this.peaks, pvPower) : kw;
+      let readKw = name === 'production' ? readMaxKw(this.peaks, pvPower) : kw;
+      // Counters of the day updated by steps (review 0.1.2, I1): a rise of the
+      // production counter after equal reads covers the time since its last
+      // change (STEP_COVER_MAX at most), never above INDEX_MAX_KW. At night
+      // (a counter frozen for hours) nothing changes: sunrise is judged on
+      // one read.
+      const ds = daily.state();
+      const change = this.counterChangedAt.get(id);
+      if (
+        name === 'production' &&
+        ds &&
+        change &&
+        change.value === ds.today &&
+        today > ds.today &&
+        now - change.at <= STEP_COVER_MAX &&
+        now - ds.readAt > 0 &&
+        now - change.at > now - ds.readAt
+      ) {
+        readKw = Math.min(INDEX_MAX_KW, (readKw * (now - change.at)) / (now - ds.readAt));
+      }
+      if (!change || change.value !== today) {
+        this.counterChangedAt.set(id, { value: today, at: now });
+      }
       daily.limits.maxKw = readKw;
       guard.maxKw = readKw;
       let total;
@@ -735,6 +766,7 @@ export class ImeonApp {
     // The built indexes and their guards are in /data BEFORE Gladys gets the
     // values: a crash in between never sends an index /data does not know.
     await this.saveState();
+    this.keptOutNames = keptOutNames;
     const states = pollStates(external, pages, this.info, values, keptOutNames);
     // Only the features the created device has (they are fixed at its creation).
     const features = created.features ? new Set(created.features.map((f) => f.external_id)) : null;

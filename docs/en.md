@@ -74,7 +74,8 @@ Rule: every doubt counts less, never more.
 - Any other drop (a reboot, a lost clock, a glitch in the day) gives no index
   until the counter is back above its last value (the status says so). What
   is not back is not counted.
-- A rise faster than 36 kW since the last value taken is a jump: never
+- A rise faster than the margin since the last value taken (36 kW for the
+  consumption, the learned margin for the production, see below) is a jump: never
   taken, never confirmed by time.
 - A "new day" taken by mistake (a counter at 0 near midnight) is undone when,
   within 3 h, the counter comes back faster than possible, straight back to
@@ -104,8 +105,12 @@ The counter of the day before shown again (a reboot of the inverter) is kept
 out of the index: after midnight, a value within 0.1 kWh of the last one read
 while the inverter has not started its new day; later the same day, a value
 within 0.1 kWh of the day before while the counter of the day is still under
-it. The counter of the day is not sent either for that read. Cost: up to
-0.1 kWh when two days end within 0.1 kWh of each other.
+it. The counter of the day is not sent either for that read, and the status
+says so. Cost: about 0.1 kWh when two days end within 0.1 kWh of each other.
+The mark of the day before is noted for the night of the new day, even when
+the inverter resets a little before our midnight. After an update from 0.1.1,
+this protection starts at the first midnight after it (or at once when the
+update falls within 3 h of a new day).
 
 Each index then passes the **guard** taken from the P1 Monitor integration:
 never 0; a plausible rise goes through (at most 36 kW on average since the
@@ -124,7 +129,23 @@ integration and kept across restarts.
   corrects itself and goes on once the counter is back above it; only the new
   energy is counted. The button answers that a drop is never accepted.
 - Saving the configuration never accepts anything.
-  If you delete and create the device again, its indexes start from scratch.
+  For the production index, when the counter of the day only moves by steps
+  (every few minutes), the rise of a step is judged on the time since the
+  previous step (20 min at most, never above 36 kW), not on a single minute.
+
+**Risk left (it would count too much)**:
+
+- the day before shown again more than 0.1 kWh away from the last value
+  read, above or below, is taken as a rise of the day;
+- any false read that fits the margin goes through: for the consumption,
+  36 kW × the length of the silence (a single false value after 30 min
+  without reads: +6.35 kWh measured); for the production, 36 kW for the
+  first 7 days and after an update, then the learned margin.
+
+**Limit (it counts less)**: after a refused jump, nothing more is taken that
+day for that index (unless the counter comes back close to its last value
+taken); the index goes on with the new day.
+If you delete and create the device again, its indexes start from scratch.
 
 ## Errors and pauses
 

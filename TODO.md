@@ -15,6 +15,11 @@
 
 ## To confirm on a real inverter (built without one)
 
+- [ ] How often /api/energy changes its counters of the day (every minute,
+      every quarter, every hour?): a step is covered for 20 min at most
+      (review 0.1.2, I1); longer steps at high power would lose the rest of a
+      sunny day.
+
 - [ ] The login form (`do_login=True`, `email`, `passwd`) and its answer
       `{ accessGranted }`; the session cookie and how long it lasts; whether
       the login page is what an ended session answers (the library's test).
@@ -194,8 +199,28 @@
     grid power page (`/api/monitor?time=minute`) is still to confirm; a margin
     learned from a doubtful power could stall the billed index for whole
     days. It keeps 36 kW.
+  - Review 0.1.2 of the fix: B1 (the mark of the day before dated with the
+    night of the new day, `daily.window(now).key`, and read for the local date
+    or that night: an inverter whose midnight comes before ours), I1 (a
+    production step covers the time since the previous change, 20 min at
+    most, 36 kW at most), I2 (docs: risks left, limit after a refused jump,
+    no "36 kW" for the production, no drop taken by the button, update
+    starts at the first midnight), m1 (mark drawn from the pending undo after
+    an update within 3 h of a new day), m2 (status note for a read kept out),
+    m3 ("about 0.1 kWh").
+  - Left (m4): an acceptance waiting is lost when the margin changes (the
+    guard is rebuilt): a second click, never a kWh too much. Optional:
+    apply it again when `held.to` did not change.
 
 ## Ideas
+
+- An optional "subscribed power (kVA)" field for the grid consumption index:
+  the Linky breaker caps what is drawn, the margin would be 1.25 × kVA (36 kW
+  when empty); or a margin learned from the accepted rises of the grid counter
+  itself (same unit as the index), with the step cover of review 0.1.2.
+- After a refused jump, keep the refused value as a threshold (as the guard)
+  and judge lower values on the margin since the last value taken (daily.js,
+  in gladys-imeon AND gladys-zeversolar).
 
 - The timeline messages (`/api/timeline`) as a scene trigger.
 - The smart load relay state (`/api/smartload`).

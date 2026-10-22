@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { DailyIndex } from '../src/daily.js';
 import {
   keptOut,
+  markFromUndo,
   maxKwOf,
   noteNewDay,
   plausiblePeak,
@@ -106,4 +107,72 @@ test('a false counter +12 kWh after 30 silent minutes is no longer taken with a 
     '4.5 kW × 0.5 h + 0.5 = 2.75 kWh at most',
   );
   assert.ok(HOUR > 0);
+});
+
+// --- Review 0.1.2, B1: an inverter whose midnight comes before ours ---------------------
+
+/** A chain in a time zone; times built in Paris (CEST, UTC+2). */
+function chainIn(timeZone) {
+  const daily = new DailyIndex(undefined, { timeZone });
+  const ref = validRef(null);
+  return {
+    ref,
+    read(today, time) {
+      if (keptOut(daily, ref, today, time)) return 'kept out';
+      const built = daily.read(today, time);
+      noteNewDay(daily, ref, time);
+      return r3(built);
+    },
+  };
+}
+
+test('the inverter resets at 23:59 (its clock ahead): the day before is still kept out the next day', () => {
+  const c = chain();
+  c.read(14.9, at(0, '23:57'));
+  c.read(15, at(0, '23:58'));
+  assert.equal(c.read(0, at(0, '23:59')), 15, 'its midnight, one minute before ours: a new day');
+  assert.equal(
+    c.ref.dayBefore.day,
+    '2026-10-13',
+    'noted for the night it starts, not for 2026-10-12',
+  );
+  for (let m = 1; m <= 60; m += 1) c.read(r3(m * 0.1), at(0, '23:59') + m * MINUTE);
+  c.read(6.1, at(1, '12:00'));
+  // A reboot after a silence shows the day before again: never a rise of today's counter.
+  assert.equal(c.read(15, at(1, '12:40')), 'kept out');
+  assert.equal(c.read(6.3, at(1, '12:41')), 21.3, 'the real counter goes on');
+});
+
+for (const [label, aheadMs, timeZone] of [
+  ['30 s', 30_000, 'Europe/Paris'],
+  ['2 min', 2 * MINUTE, 'Europe/Paris'],
+  ['20 min', 20 * MINUTE, 'Europe/Paris'],
+  ['55 min', 55 * MINUTE, 'Europe/Paris'],
+  // The inverter on Paris time, the container in Lisbon: its midnight 1 h before ours.
+  ['1 h (container in Lisbon, inverter in Paris)', 0, 'Europe/Lisbon'],
+]) {
+  test(`the inverter's midnight ${label} ahead: the day before shown at noon is kept out`, () => {
+    const c = chainIn(timeZone);
+    const reset = at(1, '00:00') - aheadMs;
+    // Reads every minute at :45 seconds, the counter at 15 until its midnight.
+    let time = at(0, '22:00') + 45_000;
+    for (; time < reset; time += MINUTE) c.read(15, time);
+    assert.equal(c.read(0, time), 15, 'its midnight: a new day, the index unchanged');
+    for (let m = 1; m <= 120; m += 1) c.read(r3(m * 0.05), time + m * MINUTE);
+    assert.equal(c.read(6.1, at(1, '12:00')), 21.1);
+    assert.equal(c.read(15.05, at(1, '12:40')), 'kept out');
+    assert.equal(c.read(6.2, at(1, '12:41')), 21.2);
+  });
+}
+
+test('after an update from 0.1.1 within 3 h of a new day, the mark comes from the undo (m1)', () => {
+  const daily = new DailyIndex(undefined, { timeZone: 'Europe/Paris' });
+  daily.read(15, at(0, '23:59'));
+  daily.read(0, at(1, '00:01'));
+  const ref = validRef(null);
+  markFromUndo(daily, ref);
+  assert.deepEqual(ref.dayBefore, { day: '2026-10-13', value: 15 });
+  const kept = { dayBefore: { day: '2026-10-13', value: 9 }, staleSeen: null };
+  markFromUndo(daily, kept);
+  assert.equal(kept.dayBefore.value, 9, 'an existing mark is kept');
 });

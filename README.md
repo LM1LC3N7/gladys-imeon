@@ -22,8 +22,11 @@ indexes (grid consumption, solar production) for the Gladys energy monitoring.
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - The inverter gives its energies as counters of the day only: the two
   indexes are built from them (`src/daily.js`) and pass the guard of
-  gladys-p1-monitor (`src/guard.js`): never 0, jumps and drops held until the
-  "Accept the held index" button.
+  gladys-p1-monitor (`src/guard.js`): never 0, jumps and drops held; a jump is
+  taken only by the "Accept the held index" button, a drop is never accepted
+  (it corrects itself). The counter of the day before shown again is kept out
+  (`src/dayBefore.js`), and the margin of the production index is learned from
+  the solar power. Risks left and limits: see the docs.
 - Refused credentials stop the reads (kept in `/data`, spaced retries), 429
   and 5xx pause them (kept in `/data`), a session is opened again at most once
   per read.

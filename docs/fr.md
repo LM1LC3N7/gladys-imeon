@@ -77,7 +77,8 @@ Règle : chaque doute compte moins, jamais plus.
 - Une autre baisse (redémarrage, horloge perdue, incident en journée) ne donne
   pas d'index tant que le compteur n'est pas revenu au-dessus de sa dernière
   valeur (l'état le dit). Ce qui ne revient pas n'est pas compté.
-- Une hausse plus rapide que 36 kW depuis la dernière valeur prise est un
+- Une hausse plus rapide que la marge depuis la dernière valeur prise (36 kW
+  pour la consommation, la marge apprise pour la production, voir plus bas) est un
   saut : jamais prise, jamais confirmée par le temps.
 - Un « nouveau jour » pris par erreur (compteur à 0 près de minuit) est annulé
   si, dans les 3 h, le compteur revient plus vite que possible, revient
@@ -109,8 +110,12 @@ hors de l'index : après minuit, une valeur à 0,1 kWh près de la dernière lue
 tant que l'onduleur n'a pas commencé son nouveau jour ; plus tard le même
 jour, une valeur à 0,1 kWh près de celle de la veille alors que le compteur
 du jour est encore en dessous. Le compteur du jour n'est pas envoyé non plus
-pour cette lecture. Coût : jusqu'à 0,1 kWh quand deux jours finissent à moins
-de 0,1 kWh l'un de l'autre.
+pour cette lecture, et l'état le signale. Coût : environ 0,1 kWh quand deux jours finissent à moins
+de 0,1 kWh l'un de l'autre. Le repère de la veille est noté pour la nuit du
+nouveau jour, même quand l'onduleur remet à zéro un peu avant notre minuit.
+Après une mise à jour depuis 0.1.1, cette protection commence au premier
+minuit qui suit (ou tout de suite si la mise à jour tombe dans les 3 h après
+un nouveau jour).
 
 Chaque index passe ensuite la **garde** reprise de l'intégration P1 Monitor :
 jamais 0 ; une hausse plausible passe (au plus 36 kW en moyenne depuis la
@@ -131,7 +136,24 @@ redémarrage.
   compteur l'a rattrapé ; seule l'énergie nouvelle est comptée. Le bouton
   répond qu'une baisse n'est jamais acceptée.
 - Enregistrer la configuration n'accepte jamais rien.
-  Si vous supprimez puis recréez l'appareil, ses index repartent de zéro.
+  Pour l'index de production, quand le compteur du jour n'avance que par
+  paliers (toutes les quelques minutes), la hausse d'un palier est jugée sur le
+  temps écoulé depuis le palier précédent (20 min au plus, jamais au-delà de
+  36 kW), pas sur une seule minute.
+
+**Risque restant (il compterait trop)** :
+
+- une veille réaffichée à plus de 0,1 kWh de la dernière valeur lue, au-dessus
+  ou au-dessous, est prise comme une hausse du jour ;
+- toute lecture fausse qui tient dans la marge passe : pour la consommation,
+  36 kW × la durée du silence (une seule valeur fausse après 30 min sans
+  lecture : +6,35 kWh mesurés) ; pour la production, 36 kW les 7 premiers
+  jours et après une mise à jour, puis la marge apprise.
+
+**Limite (il compte moins)** : après un saut refusé, plus rien n'est pris ce
+jour-là pour cet index (sauf si le compteur revient tout près de sa dernière
+valeur prise) ; l'index repart au nouveau jour.
+Si vous supprimez puis recréez l'appareil, ses index repartent de zéro.
 
 ## Erreurs et pauses
 

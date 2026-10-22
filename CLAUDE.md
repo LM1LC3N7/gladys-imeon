@@ -47,6 +47,7 @@ src/imeon/client.js               the only HTTP access (login, session, bounded 
 src/imeon/model.js                the pages -> values, /data, capabilities (pure)
 src/daily.js                      a cumulative index built from a counter of the day (pure)
 src/guard.js                      plausibility of an energy index, from gladys-p1-monitor (pure)
+src/dayBefore.js                  the day before shown again kept out, learned production margin (pure)
 src/store.js                      what /data keeps across restarts
 src/devices.js                    the device, feature keys, states (pure)
 src/config.js                     address, user name, password, normalized
@@ -64,10 +65,15 @@ test/                             node --test, against the SDK's fake Gladys (in
   `index`) and `production_index` (solar, `energy-production-sensor` /
   `index`, with its `thirty-minutes-production` declared with UUID v5 ids)
   are the only indexes. They are built from the counters of the day by
-  `src/daily.js` (a new day never drops them; any doubt counts less, never
-  more) and pass `IndexGuard` (`src/guard.js`): never 0, a drop and a jump
-  never confirmed by repetition nor by time, only by the `accept_held_index`
-  action, bounded to the value shown. The counters of the day stay plain
+  `src/daily.js` (a new day never drops them; any doubt counts less) and pass
+  `IndexGuard` (`src/guard.js`): never 0, a drop and a jump never confirmed
+  by repetition nor by time. A jump is taken only by the `accept_held_index`
+  action, bounded to the value shown; a DROP of a built index is never
+  accepted (it corrects itself). `src/dayBefore.js` keeps the counter of the
+  day before shown again out (±0.1 kWh) and learns the margin of the
+  production index from the solar power (the consumption index keeps 36 kW).
+  `src/daily.js` and `src/guard.js` are shared with gladys-zeversolar: change
+  them only in both. Risks left and limits: docs. The counters of the day stay plain
   sensors: never an index, never `daily-consumption`, never
   `publishEnergyConsumption`.
 - **Credentials**: the password lives in memory only; never in logs, `/data`,

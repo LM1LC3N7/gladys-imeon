@@ -100,7 +100,7 @@ export const TIME_ZONE = process.env.TZ || 'Europe/Paris';
 
 /**
  * The day before shown again (src/dayBefore.js): a value within this band of
- * it (kWh, above and below) is kept out of the index. Cost: up to 0.1 kWh at
+ * it (kWh, above and below) is kept out of the index. Cost: about 0.1 kWh at
  * the end of a day that ends within 0.1 kWh of the day before.
  */
 export const STALE_BAND_KWH = 0.1;
@@ -119,6 +119,13 @@ export const PEAK_DAYS_KEPT = 30;
 export const PEAK_OUTLIER = 1.5;
 /** A solar power above this (W) is never a peak: above any IMEON model (65535 W, an error value). */
 export const PLAUSIBLE_POWER_MAX = 40_000;
+
+/**
+ * Counters of the day updated by steps (review 0.1.2, I1): the rise of a
+ * production read may cover the time since the counter last changed, at
+ * most this long (and never above INDEX_MAX_KW).
+ */
+export const STEP_COVER_MAX = 20 * 60_000;
 
 /** A power above this (W) is a glitch. */
 export const POWER_MAX = 100_000;

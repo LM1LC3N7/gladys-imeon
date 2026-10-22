@@ -473,3 +473,65 @@ test('fix 0.1.2: a drop of the built index is never accepted; only the new energ
   assert.equal(Math.round(counted * 1000) / 1000, 1, 'only the energy above 1000 kWh is counted');
   assert.ok(Math.min(...values) >= 1000);
 });
+
+test('review 0.1.2, I1: a solar counter updated every 8 min at 5 kW loses nothing over 2 days', async () => {
+  const r = imeonRoutes();
+  // Seven days of 5 kW peaks already learned: a margin of 7.5 kW.
+  const peaks = Array.from({ length: 7 }, (_, i) => ({ day: `2026-10-1${i}`, w: 5000 }));
+  const store = createMemoryStore({ serial: SERIAL, peaks });
+  const start = Date.UTC(2026, 9, 20, 22, 0); // 2026-10-21 00:00 in Paris
+  const { app, gladys, clock, timers } = await setup({
+    routes: r,
+    devices: [created()],
+    store,
+    now: start,
+  });
+  /**
+   * The world at a local minute of the day: the sun from 08:00 to 18:00, up to
+   * 5 kW from 10:00 to 16:00 (40 kWh a day), the counter changed by 8-min steps.
+   */
+  const power = (t) => (t <= 0 || t >= 600 ? 0 : 5 * Math.min(1, t / 120, (600 - t) / 120));
+  const energyAt = (t) => {
+    if (t <= 0) return 0;
+    if (t <= 120) return (5 * t * t) / 240 / 60;
+    if (t <= 480) return 5 + (5 * (t - 120)) / 60;
+    if (t < 600) return 40 - (5 * (600 - t) ** 2) / 240 / 60;
+    return 40;
+  };
+  const world = (minuteOfDay) => {
+    const t = minuteOfDay - 480;
+    r['/api/pv'] = (call) =>
+      call.headers.Cookie === COOKIE
+        ? json({
+            result: JSON.stringify({ ...RESULTS.pv, power_total: Math.round(power(t) * 1000) }),
+          })
+        : loginPage();
+    energy(r, { pv: Math.round(energyAt(Math.floor(Math.max(0, t) / 8) * 8) * 1000) });
+  };
+  world(0);
+  await app.start(CONFIG);
+  await app.idle();
+  const published = () =>
+    gladys.fake.states
+      .filter((s) => s.device_feature_external_id === F('production_index'))
+      .map((s) => s.state);
+  for (let day = 0; day < 2; day += 1) {
+    for (let minute = day === 0 ? 1 : 0; minute < 1440; minute += 1) {
+      // Every minute in the day, every 10 minutes at night.
+      const daytime = minute >= 470 && minute <= 1090;
+      if (!daytime && minute % 10 !== 0) continue;
+      clock.now = start + (day * 1440 + minute) * MINUTE;
+      world(minute);
+      await timers.runIntervals();
+    }
+  }
+  const values = published();
+  let counted = 0;
+  for (let i = 1; i < values.length; i += 1) {
+    if (values[i] > values[i - 1]) counted += values[i] - values[i - 1];
+  }
+  // 40 kWh a day: both days counted, nothing lost to the steps. Two equal days:
+  // the last step of day 2 (within 0.1 kWh of the day before) is kept out,
+  // the documented cost of the band (one step here, 0.2 kWh).
+  assert.ok(counted >= 79.75 && counted <= 80.001, `counted ${counted}`);
+});

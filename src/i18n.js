@@ -114,6 +114,11 @@ export const T = {
       en: `The counter of the day made a jump or a drop that is not a new day (${names.map((n) => INDEX[n].en).join(', ')}): no index until it is back to a plausible value; what is not back is not counted.`,
       fr: `Le compteur du jour a fait un saut ou une baisse qui n’est pas un nouveau jour (${names.map((n) => INDEX[n].fr).join(', ')}) : pas d’index tant qu’il n’est pas revenu à une valeur plausible ; ce qui ne revient pas n’est pas compté.`,
     }),
+    /** A read kept out of the index: the counter of the day before shown again (review 0.1.2, m2). */
+    stale: (names) => ({
+      en: `The counter of the day looks like the one of the day before shown again (${names.map((n) => INDEX[n].en).join(', ')}): kept out of the index, nothing counted, until it moves away from it.`,
+      fr: `Le compteur du jour ressemble à celui de la veille réaffiché (${names.map((n) => INDEX[n].fr).join(', ')}) : gardé hors de l’index, rien n’est compté tant qu’il ne s’en éloigne pas.`,
+    }),
     held: (name, { direction, from, to }) => {
       const index = INDEX[name];
       if (direction === 'down') {
